@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Search
+Exec=xfce4-appfinder
+Icon=system-search-symbolic

@@ -1,0 +1,126 @@
+# i3 inside XFCE: i3 manages windows; xfce4-panel, xfsettingsd, picom stay.
+set $mod Mod4
+font pango:Inter 10
+
+# --- look: flat 1px white border on the focused window, no title bars, gaps
+default_border pixel 1
+default_floating_border pixel 1
+hide_edge_borders none
+gaps inner 12
+gaps outer 0
+#                        border   bg       text     indicator child_border
+client.focused           #ffffff  #ffffff  #000000  #ffffff   #ffffff
+client.focused_inactive  #555555  #555555  #ffffff  #555555   #555555
+client.unfocused         #333333  #333333  #888888  #333333   #333333
+client.urgent            #ff5555  #ff5555  #ffffff  #ff5555   #ff5555
+
+# --- XFCE pieces float / stay out of tiling
+for_window [class="Xfce4-panel"] floating enable, border none
+for_window [class="Xfce4-appfinder"] floating enable
+for_window [class="Xfce4-settings-manager"] floating enable
+for_window [class="Xfce4-notifyd"] floating enable, border none
+for_window [window_role="pop-up"] floating enable
+for_window [window_type="dialog"] floating enable
+for_window [window_type="menu"] floating enable
+no_focus [class="Xfce4-notifyd"]
+
+# --- startup
+exec --no-startup-id @picom@ --config "@picomconf@"
+exec --no-startup-id @feh@ --no-fehbg --bg-fill "@wallpaper@"
+
+# --- launch
+bindsym $mod+Return exec @ghostty@
+bindsym $mod+space exec xfce4-popup-whiskermenu
+bindsym $mod+d exec xfce4-appfinder
+bindsym $mod+Shift+f exec thunar
+bindsym $mod+q kill
+
+# --- focus / move (arrows and vim keys)
+bindsym $mod+Left  focus left
+bindsym $mod+Down  focus down
+bindsym $mod+Up    focus up
+bindsym $mod+Right focus right
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Shift+Left  move left
+bindsym $mod+Shift+Down  move down
+bindsym $mod+Shift+Up    move up
+bindsym $mod+Shift+Right move right
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+
+# --- layout
+bindsym $mod+b split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+Tab focus mode_toggle
+bindsym $mod+a focus parent
+floating_modifier $mod
+tiling_drag modifier titlebar
+
+# --- workspaces
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
+set $ws6 "6"
+set $ws7 "7"
+set $ws8 "8"
+set $ws9 "9"
+bindsym $mod+1 workspace number $ws1
+bindsym $mod+2 workspace number $ws2
+bindsym $mod+3 workspace number $ws3
+bindsym $mod+4 workspace number $ws4
+bindsym $mod+5 workspace number $ws5
+bindsym $mod+6 workspace number $ws6
+bindsym $mod+7 workspace number $ws7
+bindsym $mod+8 workspace number $ws8
+bindsym $mod+9 workspace number $ws9
+bindsym $mod+Shift+1 move container to workspace number $ws1
+bindsym $mod+Shift+2 move container to workspace number $ws2
+bindsym $mod+Shift+3 move container to workspace number $ws3
+bindsym $mod+Shift+4 move container to workspace number $ws4
+bindsym $mod+Shift+5 move container to workspace number $ws5
+bindsym $mod+Shift+6 move container to workspace number $ws6
+bindsym $mod+Shift+7 move container to workspace number $ws7
+bindsym $mod+Shift+8 move container to workspace number $ws8
+bindsym $mod+Shift+9 move container to workspace number $ws9
+# move workspace between the LG and the ASUS
+bindsym $mod+Ctrl+Left  move workspace to output left
+bindsym $mod+Ctrl+Right move workspace to output right
+
+# --- resize
+mode "resize" {
+    bindsym Left  resize shrink width 40 px or 4 ppt
+    bindsym Right resize grow width 40 px or 4 ppt
+    bindsym Up    resize shrink height 40 px or 4 ppt
+    bindsym Down  resize grow height 40 px or 4 ppt
+    bindsym h resize shrink width 40 px or 4 ppt
+    bindsym l resize grow width 40 px or 4 ppt
+    bindsym k resize shrink height 40 px or 4 ppt
+    bindsym j resize grow height 40 px or 4 ppt
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# --- i3 / session
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exec xfce4-session-logout
+bindsym $mod+Escape exec xflock4
+
+# --- notifications (dunst)
+exec --no-startup-id @dunst@
+bindsym $mod+n exec @dunstctl@ close
+bindsym $mod+Shift+n exec @dunstctl@ close-all
+bindsym $mod+grave exec @dunstctl@ history-pop

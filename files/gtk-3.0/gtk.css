@@ -1,0 +1,10 @@
+
+/* macOS-style panel */
+#XfcePanelWindow { box-shadow: none; border: none; }
+.xfce4-panel, .xfce4-panel label, .xfce4-panel button { color: #ffffff; font-family: "Inter"; font-weight: 400;
+  text-shadow: none; -gtk-icon-shadow: none; }
+.xfce4-panel button, .xfce4-panel button:hover, .xfce4-panel button:checked, .xfce4-panel button:active {
+  padding: 0 7px; border: none; box-shadow: none; background: none; background-image: none; outline: none; }
+/* align menu-bar ends with i3 window edges */
+#clock-8 button, #clock-8 { padding-right: 8px; }
+#launcher-27 button { padding-left: 8px; }

@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=WhiteSur-Mac
+Comment=WhiteSur with macOS-proportioned menu bar icons
+Inherits=WhiteSur,hicolor
+Directories=scalable
+
+[scalable]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Status

@@ -1,0 +1,87 @@
+# dunst: one line at a time, inside the centre of the menu bar, no background; picom slides it in.
+# Physical pixels (scale = 1) so it lines up with i3 gaps (18px) and the 36px menu bar.
+[global]
+    monitor = 0
+    follow = none
+    scale = 1
+    origin = top-center
+    offset = (0, 0)
+
+    # one at a time, every card the same shape
+    notification_limit = 1
+    indicate_hidden = no
+    width = (200, 1600)
+    height = (34, 34)
+    gap_size = 18
+
+    # flat card, lighter than the windows; no outline (critical gets one below)
+    frame_width = 0
+    corner_radius = 0
+    padding = 0
+    horizontal_padding = 12
+    text_icon_padding = 10
+    separator_height = 0
+    progress_bar = true
+    progress_bar_height = 6
+    progress_bar_frame_width = 0
+    progress_bar_corner_radius = 0
+
+    # two lines, never more
+    font = Inter 10
+    line_height = 0
+    markup = full
+    format = "<span weight='600'>%s</span>   <span foreground='#ffffffc8'>%b</span>"
+    alignment = center
+    vertical_alignment = center
+    ellipsize = end
+    ignore_newline = yes
+    show_age_threshold = -1
+    stack_duplicates = true
+    hide_duplicate_count = true
+    show_indicators = no
+
+    icon_position = left
+    enable_recursive_icon_lookup = true
+    icon_theme = "WhiteSur-Mac, WhiteSur, hicolor"
+    min_icon_size = 22
+    max_icon_size = 22
+
+    # history is kept, just out of sight (Super+` brings it back)
+    sticky_history = no
+    history_length = 30
+
+    # one click does one thing: open the app
+    mouse_left_click = do_action, close_current
+    mouse_middle_click = close_current
+    mouse_right_click = close_current
+
+    browser = /usr/bin/xdg-open
+    title = Dunst
+    class = Dunst
+    ignore_dbusclose = false
+
+[urgency_low]
+    background = "#00000000"
+    foreground = "#ffffff"
+    frame_color = "#00000000"
+    timeout = 5
+
+[urgency_normal]
+    background = "#00000000"
+    foreground = "#ffffff"
+    frame_color = "#00000000"
+    timeout = 6
+
+[urgency_critical]
+    background = "#00000000"
+    foreground = "#ff6961"
+    frame_color = "#00000000"
+    timeout = 0
+
+# stay quiet while something is fullscreen; show it when you come back
+[fullscreen_wait]
+    fullscreen = delay
+
+[fullscreen_critical_still_shows]
+    urgency = critical
+    fullscreen = show

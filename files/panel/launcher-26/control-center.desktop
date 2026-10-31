@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Control Center
+Exec=xfce4-settings-manager
+Icon=macos-control-center-symbolic
