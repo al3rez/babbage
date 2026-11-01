@@ -1,10 +1,22 @@
-# Desktop
+# tilebian
 
-Debian 13 + XFCE session running i3, set up with Home Manager.
+Debian 13 + XFCE running i3 tiling, with a flat macOS-style menu bar, Ghostty and
+notifications that slide into the bar. One command takes a fresh Debian install there,
+built with a Nix Home Manager flake.
+
+![tilebian at 4K](docs/screenshot.png)
+
+<sub>Full 3840×2160 screenshot from a fresh Debian 13 VM right after `bootstrap.sh`. Below, the
+two top halves at 1:1 (no scaling).</sub>
+
+| Left: workspace + pinned apps, Ghostty in Berkeley Mono | Right: notification in the bar, status icons, clock |
+|---|---|
+| ![left half at 1:1](docs/zoom-left.png) | ![right half at 1:1](docs/zoom-right.png) |
 
 ```sh
-./bootstrap.sh              # this machine (NVIDIA)
-./bootstrap.sh al3rez-vm    # other machines / VMs (Mesa)
+git clone https://github.com/al3rez/tilebian ~/.config/home-manager
+~/.config/home-manager/bootstrap.sh              # NVIDIA machine (LG 4K + ASUS layout)
+~/.config/home-manager/bootstrap.sh al3rez-vm    # anything else (Mesa)
 ```
 
 After the first run, apply changes with:
