@@ -27,6 +27,10 @@ Suites: trixie
 Components: main
 Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
 EOF
+# Debian's Thailand mirror: ~2x deb.debian.org from Bangkok (measured); security stays upstream
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do
+  [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
+done
 sudo apt-get update
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
