@@ -4,6 +4,9 @@
   # WhiteSur base + WhiteSur-Mac overrides (macOS-proportioned status icons, Ghostty/Telegram icons)
   xdg.dataFile."icons/WhiteSur".source = "${pkgs.whitesur-icon-theme}/share/icons/WhiteSur";
   xdg.dataFile."icons/WhiteSur-Mac".source = ../files/icons/WhiteSur-Mac;
+  # macOS-style Grok Bot icon (App Store artwork on the Big Sur squircle, WhiteSur margins);
+  # per-file links so other apps can still write into ~/.local/share/icons/hicolor
+  xdg.dataFile."icons/hicolor" = { source = ../files/icons/hicolor; recursive = true; };
 
   # titleless xfwm4 theme (fallback window manager)
   home.file.".themes/NoTitle".source = ../files/themes/NoTitle;
@@ -15,4 +18,8 @@
 
   # no "EN" input-method icon in the tray
   dconf.settings."org/freedesktop/ibus/panel".show-icon-on-systray = false;
+
+  # blueman's file-transfer plugin races obexd at login and fails with a D-Bus
+  # "Timeout was reached"; Bluetooth file transfer isn't used here
+  dconf.settings."org/blueman/general".plugin-list = [ "!TransferService" ];
 }

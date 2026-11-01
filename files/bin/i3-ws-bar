@@ -1,0 +1,142 @@
+#!@python@
+"""Per-monitor i3 workspace numbers for xfce4-panel.
+
+Every panel has nine genmon slots whose commands are
+`cat ~/.cache/i3-ws-bar/<OUTPUT>/<N>.genmon`, where OUTPUT is the xrandr/i3 output
+name the panel is pinned to (or `_all` for a single bar showing every output). A slot
+shows workspace N only while that workspace lives on OUTPUT, so each monitor's bar
+lists just its own workspaces (like i3bar).
+This daemon listens on the i3 IPC socket, rewrites slot files on workspace changes,
+and pushes changed slots to the panel with
+`xfce4-panel --plugin-event=genmon-<id>:refresh:bool:true`. The text font is the
+genmon plugin's Font setting (kept equal to the clock's).
+"""
+import fcntl, glob, json, os, re, select, socket, struct, subprocess, sys, time
+
+CACHE = os.path.expanduser("~/.cache/i3-ws-bar")
+PANEL_RC = os.path.expanduser("~/.config/xfce4/panel")
+SLOT_RE = re.compile(r"i3-ws-bar/([^/\s]+)/(\d+)\.genmon")
+ALL_OUTPUTS = "_all"
+# Pango foreground per state: keyboard focus stands out, the other monitor's current is mid, rest dim
+STYLE = {"focused": 'alpha="100%"', "visible": 'alpha="70%"', "urgent": 'foreground="#ff5555"', "": 'alpha="45%"'}
+
+MAGIC = b"i3-ipc"
+GET_WORKSPACES, SUBSCRIBE = 1, 2
+EVENT_BIT = 1 << 31
+SHUTDOWN_EVENT = 6
+
+
+class I3:
+    def __init__(self):
+        path = os.environ.get("I3SOCK") or subprocess.run(
+            ["@i3@", "--get-socketpath"], capture_output=True, text=True, check=True).stdout.strip()
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(path)
+
+    def send(self, kind, payload=""):
+        data = payload.encode()
+        self.sock.sendall(MAGIC + struct.pack("=II", len(data), kind) + data)
+
+    def recv(self):
+        head = self._exact(14)
+        if head[:6] != MAGIC:
+            raise ConnectionError("bad i3 ipc magic")
+        length, kind = struct.unpack("=II", head[6:])
+        return kind, json.loads(self._exact(length))
+
+    def query(self, kind, payload=""):
+        self.send(kind, payload)
+        return self.recv()[1]
+
+    def _exact(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("i3 closed the socket")
+            buf += chunk
+        return buf
+
+
+def slots():
+    """Map (output, workspace number) -> genmon plugin id from the panel's genmon rc files."""
+    found = {}
+    for rc in glob.glob(os.path.join(PANEL_RC, "genmon-*.rc")):
+        with open(rc) as f:
+            m = SLOT_RE.search(f.read())
+        if m:
+            found[(m.group(1), int(m.group(2)))] = int(re.search(r"genmon-(\d+)\.rc$", rc).group(1))
+    return found
+
+
+def update(i3, last):
+    meta = {w["num"]: w for w in i3.query(GET_WORKSPACES)}
+    slot_ids = slots()
+    for (output, num), plugin_id in slot_ids.items():
+        ws = meta.get(num)
+        if ws is None or output not in (ALL_OUTPUTS, ws["output"]):
+            content = "<txt></txt>"  # empty output would make genmon show "XXX"
+        else:
+            state = "urgent" if ws["urgent"] else "focused" if ws["focused"] else "visible" if ws["visible"] else ""
+            content = (f"<txt><span {STYLE[state]}>{num}</span></txt>"
+                       f"<txtclick>@i3msg@ -q workspace number {num}</txtclick>"
+                       f"<tool>Workspace {num}</tool>")
+        if last.get((output, num)) == content:
+            continue
+        directory = os.path.join(CACHE, output)
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, f"{num}.genmon")
+        with open(path + ".tmp", "w") as f:
+            f.write(content)
+        os.replace(path + ".tmp", path)
+        last[(output, num)] = content
+        # run (not Popen): waiting reaps the child, so no zombies pile up in this long-lived daemon
+        subprocess.run(["@xfce4panel@", f"--plugin-event=genmon-{plugin_id}:refresh:bool:true"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+
+
+def run(on_connected):
+    events = I3()
+    events.send(SUBSCRIBE, json.dumps(["workspace", "output", "shutdown"]))
+    if not events.recv()[1].get("success"):
+        raise ConnectionError("i3 refused the subscription")
+    query, last = I3(), {}
+    on_connected()
+    update(query, last)
+    while True:
+        kind, event = events.recv()
+        if (kind & ~EVENT_BIT) == SHUTDOWN_EVENT:
+            if event.get("change") == "exit":
+                sys.exit(0)
+            raise ConnectionError("i3 restarting")
+        # coalesce bursts (e.g. moving a workspace fires several events)
+        while select.select([events.sock], [], [], 0.04)[0]:
+            events.recv()
+        update(query, last)
+
+
+def main():
+    os.makedirs(CACHE, exist_ok=True)
+    lock = open(os.path.join(CACHE, "lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return  # already running (exec_always fires again on i3 restart)
+    failing_since = None
+
+    def connected():
+        nonlocal failing_since
+        failing_since = None
+
+    while True:
+        try:
+            run(connected)
+        except (ConnectionError, OSError, subprocess.SubprocessError):
+            failing_since = failing_since or time.monotonic()
+            if time.monotonic() - failing_since > 30:
+                sys.exit(1)  # i3 is gone for good
+            time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    main()

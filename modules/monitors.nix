@@ -1,7 +1,11 @@
-{ lib, config, ... }:
+{ lib, config, pkgs, desk, ... }:
 
 let
   cfg = config.desk.monitors;
+  # RandR-event-driven: reapplies the layout and re-seats the bars whenever the driver resets them
+  guard = pkgs.writeScript "monitor-layout-guard"
+    (builtins.replaceStrings [ "@python@" ] [ "${pkgs.python3.withPackages (p: [ p.xlib ])}/bin/python3" ]
+      (builtins.readFile ../files/bin/monitor-layout-guard));
 in
 {
   options.desk.monitors.nvidia = lib.mkOption {
@@ -12,12 +16,14 @@ in
 
   # LG UltraGear on the left (primary, native 4K@240), ASUS MB16FC on the right drawn at
   # 2880x1800 and scaled by the NVIDIA driver so it matches its original size at 144 DPI.
+  # The driver forgets this after the monitors sleep/wake, so a guard reapplies it whenever
+  # it gets reset (and sets it at login).
   config = lib.mkIf cfg.nvidia {
     xdg.configFile."autostart/monitors.desktop".text = ''
       [Desktop Entry]
       Type=Application
-      Name=Monitor layout
-      Exec=sh -c 'nvidia-settings --assign CurrentMetaMode="DP-2: 3840x2160_240 +0+0 {ForceCompositionPipeline=On}, DP-4: 1920x1200_60 +3840+360 {ViewPortIn=2880x1800, ViewPortOut=1920x1200+0+0, ForceCompositionPipeline=On}" && xrandr --output DP-2 --primary'
+      Name=Monitor layout guard
+      Exec=env WALLPAPER=${desk.wallpaper} PATH=${lib.makeBinPath [ pkgs.feh pkgs.procps ]}:/usr/bin:/bin ${guard}
       X-GNOME-Autostart-enabled=true
     '';
   };

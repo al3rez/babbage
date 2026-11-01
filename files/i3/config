@@ -27,6 +27,8 @@ no_focus [class="Xfce4-notifyd"]
 # --- startup
 exec --no-startup-id @picom@ --config "@picomconf@"
 exec --no-startup-id @feh@ --no-fehbg --bg-fill "@wallpaper@"
+# workspace numbers in the xfce4-panel bars (genmon slots); exits if already running
+exec_always --no-startup-id @i3wsbar@
 
 # --- launch
 bindsym $mod+Return exec @ghostty@

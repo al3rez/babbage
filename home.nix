@@ -2,6 +2,27 @@
 
 let
   gl = config.lib.nixGL.wrap;
+
+  # nixGL finds the driver version with ".*Module  ([0-9.]+)  .*" on
+  # /proc/driver/nvidia/version, which misses the open kernel module's
+  # "Open Kernel Module for x86_64  615.71.10" and breaks the NVIDIA wrapper.
+  # Hand it the same file reworded to the format it expects (still read at switch time).
+  nvidiaVersionFile = pkgs.runCommand "impure-nvidia-version-file" {
+    time = builtins.currentTime;
+    preferLocalBuild = true;
+    allowSubstitutes = false;
+  } ''
+    sed 's/Open Kernel Module for [^ ]*/Kernel Module/' /proc/driver/nvidia/version > $out 2>/dev/null || touch $out
+  '';
+  # same as nixGL's flake output (its own pinned nixpkgs, unfree allowed for the NVIDIA
+  # driver libraries), plus the version file
+  nixglPackages = import "${nixgl}/default.nix" {
+    pkgs = import nixgl.inputs.nixpkgs {
+      system = pkgs.stdenv.hostPlatform.system;
+      config.allowUnfree = true;
+    };
+    inherit nvidiaVersionFile;
+  };
 in
 {
   imports = [
@@ -16,6 +37,7 @@ in
     ./modules/theme.nix
     ./modules/shell.nix
     ./modules/monitors.nix
+    ./modules/power.nix
   ];
 
   home.username = "al3rez";
@@ -29,7 +51,7 @@ in
   targets.genericLinux = {
     enable = true;
     nixGL = {
-      packages = nixgl.packages;
+      packages = nixglPackages;
       defaultWrapper = gpu;
       installScripts = [ gpu ];
     };

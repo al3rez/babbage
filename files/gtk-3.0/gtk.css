@@ -6,5 +6,5 @@
 .xfce4-panel button, .xfce4-panel button:hover, .xfce4-panel button:checked, .xfce4-panel button:active {
   padding: 0 7px; border: none; box-shadow: none; background: none; background-image: none; outline: none; }
 /* align menu-bar ends with i3 window edges */
-#clock-8 button, #clock-8 { padding-right: 8px; }
-#launcher-27 button { padding-left: 8px; }
+#clock-8 button, #clock-8, #clock-63 button, #clock-63 { padding-right: 8px; }
+#launcher-27 button, #launcher-56 button { padding-left: 8px; }

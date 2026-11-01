@@ -59,6 +59,10 @@
     title = Dunst
     class = Dunst
     ignore_dbusclose = false
+    # Only one notification shows at a time, so one that never expires (e.g. a web push
+    # asking to stay until dismissed) blocks everything queued behind it. Use the timeouts
+    # below instead of the sender's; dismissed ones stay in history (Super+`).
+    ignore_timeout = yes
 
 [urgency_low]
     background = "#00000000"
@@ -76,7 +80,7 @@
     background = "#00000000"
     foreground = "#ff6961"
     frame_color = "#00000000"
-    timeout = 0
+    timeout = 10
 
 # stay quiet while something is fullscreen; show it when you come back
 [fullscreen_wait]
