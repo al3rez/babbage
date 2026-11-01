@@ -28,7 +28,7 @@ Components: main
 Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
 EOF
 # Debian's Thailand mirror: ~2x deb.debian.org from Bangkok (measured); security stays upstream
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/mirrors/debian.list; do
   [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
 done
 sudo apt-get update
