@@ -13,6 +13,11 @@ and Ghostty tiled by i3, a notification in the bar. Below, the two top halves at
 |---|---|
 | ![left half at 1:1](docs/zoom-left.png) | ![right half at 1:1](docs/zoom-right.png) |
 
+Notifications are one line in the middle of the bar: no card, no background. picom slides them
+down in and back up out (recorded in the VM at 60 fps, real speed, then 4× slower):
+
+![notification sliding into the menu bar](docs/notification.gif)
+
 ```sh
 git clone https://github.com/al3rez/tilebian ~/.config/home-manager
 ~/.config/home-manager/bootstrap.sh              # NVIDIA machine (LG 4K + ASUS layout)
