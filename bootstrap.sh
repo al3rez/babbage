@@ -35,7 +35,7 @@ sudo apt-get update
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \
-  blueman network-manager-gnome firefox-esr grok-bot tailscale
+  blueman network-manager-gnome firefox-esr tailscale
 if [ "$profile" = "al3rez" ]; then
   sudo apt-get install -y nvidia-settings
   # driver-level monitor layout + soft DPMS (monitors stay connected while asleep);
@@ -44,6 +44,13 @@ if [ "$profile" = "al3rez" ]; then
 fi
 sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on
+
+# Grok Bot is 112 MB from Cloudflare, which crawls over some IPv4 routes (~30 KB/s vs MB/s
+# over IPv6, measured from Bangkok), so it installs in the background while Nix runs.
+# Last apt step on purpose: it holds the apt lock until done. Progress: journalctl -u grok-bot-install
+systemctl is-active --quiet grok-bot-install ||
+  sudo systemd-run --unit=grok-bot-install --collect --setenv=DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y grok-bot
 
 # 2. Nix (flakes enabled by the Determinate installer)
 if ! command -v nix >/dev/null 2>&1; then
@@ -57,4 +64,5 @@ nix run home-manager/master -- switch -b backup --impure --flake "$here#$profile
 
 echo
 echo "Done. Log out and back in to start the i3 + XFCE session."
+systemctl is-active --quiet grok-bot-install && echo "Grok Bot is still downloading in the background (journalctl -fu grok-bot-install)."
 tailscale status >/dev/null 2>&1 || echo "Then run 'tailscale up' once to join your tailnet."
