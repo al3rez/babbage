@@ -6,10 +6,10 @@ built with a Nix Home Manager flake.
 
 ![tilebian at 4K](docs/screenshot.png)
 
-<sub>Full 3840×2160 screenshot from a fresh Debian 13 VM right after `bootstrap.sh`. Below, the
-two top halves at 1:1 (no scaling).</sub>
+<sub>Full 3840×2160 screenshot from a fresh Debian 13 VM right after `bootstrap.sh`: Firefox, Telegram
+and Ghostty tiled by i3, a notification in the bar. Below, the two top halves at 1:1 (no scaling).</sub>
 
-| Left: workspace + pinned apps, Ghostty in Berkeley Mono | Right: notification in the bar, status icons, clock |
+| Left: workspace + pinned apps, Firefox | Right: notification in the bar, status icons, clock, Telegram |
 |---|---|
 | ![left half at 1:1](docs/zoom-left.png) | ![right half at 1:1](docs/zoom-right.png) |
 
