@@ -10,7 +10,7 @@ Debian 13 + XFCE session running i3, set up with Home Manager.
 After the first run, apply changes with:
 
 ```sh
-home-manager switch --impure --flake ~/.config/home-manager#al3rez
+home-manager switch --flake ~/.config/home-manager#al3rez
 ```
 
 ## What it sets up

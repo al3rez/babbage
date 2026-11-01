@@ -10,9 +10,14 @@
     # OpenGL/NVIDIA wrapper so Nix-built GUI apps (Ghostty, Telegram, picom) work on Debian.
     # Kept on its own pinned nixpkgs: its wrappers still use packages unstable has dropped.
     nixgl.url = "github:nix-community/nixGL";
+    # NVIDIA: run those apps against the host's own driver libraries instead
+    nix-gl-host = {
+      url = "github:numtide/nix-gl-host";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, home-manager, nixgl, ... }:
+  outputs = { nixpkgs, home-manager, nixgl, nix-gl-host, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -21,7 +26,7 @@
       };
       mkHome = gpu: home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
-        extraSpecialArgs = { inherit nixgl gpu; };
+        extraSpecialArgs = { inherit nixgl gpu; nixglhost = nix-gl-host.packages.${system}.default; };
         modules = [ ./home.nix ];
       };
     in

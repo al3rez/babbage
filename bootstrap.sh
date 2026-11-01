@@ -60,7 +60,7 @@ fi
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 
 # 3. Everything else: i3, picom, dunst, Ghostty, Telegram, fonts, icons, wallpaper, xfconf
-nix run home-manager/master -- switch -b backup --impure --flake "$here#$profile"
+nix run home-manager/master -- switch -b backup --flake "$here#$profile"
 
 echo
 echo "Done. Log out and back in to start the i3 + XFCE session."

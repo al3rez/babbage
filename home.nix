@@ -1,28 +1,22 @@
-{ config, pkgs, nixgl, gpu, ... }:
+{ config, lib, pkgs, nixgl, nixglhost, gpu, ... }:
 
 let
-  gl = config.lib.nixGL.wrap;
-
-  # nixGL finds the driver version with ".*Module  ([0-9.]+)  .*" on
-  # /proc/driver/nvidia/version, which misses the open kernel module's
-  # "Open Kernel Module for x86_64  615.71.10" and breaks the NVIDIA wrapper.
-  # Hand it the same file reworded to the format it expects (still read at switch time).
-  nvidiaVersionFile = pkgs.runCommand "impure-nvidia-version-file" {
-    time = builtins.currentTime;
-    preferLocalBuild = true;
-    allowSubstitutes = false;
-  } ''
-    sed 's/Open Kernel Module for [^ ]*/Kernel Module/' /proc/driver/nvidia/version > $out 2>/dev/null || touch $out
-  '';
-  # same as nixGL's flake output (its own pinned nixpkgs, unfree allowed for the NVIDIA
-  # driver libraries), plus the version file
-  nixglPackages = import "${nixgl}/default.nix" {
-    pkgs = import nixgl.inputs.nixpkgs {
-      system = pkgs.stdenv.hostPlatform.system;
-      config.allowUnfree = true;
-    };
-    inherit nvidiaVersionFile;
+  # NVIDIA: run GL apps against the host's own driver libraries (nix-gl-host), so they always
+  # match whatever driver apt installed. nixGL instead downloads the driver .run from
+  # download.nvidia.com/XFree86/..., which 404s for CUDA-repo drivers (615.71.10 only exists
+  # under /tesla/), and would need a flake update after every driver upgrade.
+  hostGL = pkg: pkgs.symlinkJoin {
+    name = "${pkg.name}-hostgl";
+    paths = [ pkg ];
+    postBuild = ''
+      for b in $out/bin/*; do
+        t=$(readlink -f "$b"); rm "$b"
+        printf '#!%s\nexec %s %s "$@"\n' ${pkgs.runtimeShell} ${nixglhost}/bin/nixglhost "$t" > "$b"
+        chmod +x "$b"
+      done
+    '';
   };
+  gl = if gpu == "nvidia" then hostGL else config.lib.nixGL.wrap;
 in
 {
   imports = [
@@ -45,15 +39,14 @@ in
   home.stateVersion = "25.05";
   programs.home-manager.enable = true;
 
-  # Debian (not NixOS): set up XDG/session plumbing for Nix-installed apps, plus the GL
-  # wrapper for Nix GUI apps (the NVIDIA one reads the driver version at switch time,
-  # hence `--impure`)
+  # Debian (not NixOS): set up XDG/session plumbing for Nix-installed apps, plus nixGL's
+  # Mesa wrapper for Nix GUI apps on non-NVIDIA machines
   targets.genericLinux = {
     enable = true;
-    nixGL = {
-      packages = nixglPackages;
-      defaultWrapper = gpu;
-      installScripts = [ gpu ];
+    nixGL = lib.mkIf (gpu != "nvidia") {
+      packages = nixgl.packages;
+      defaultWrapper = "mesa";
+      installScripts = [ "mesa" ];
     };
   };
   xdg.enable = true;
