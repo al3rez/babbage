@@ -35,11 +35,11 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 | Area | Where |
 |---|---|
 | i3 instead of xfwm4 in the XFCE session, 12px gaps, flat 1px white borders | `modules/session.nix`, `modules/i3.nix`, `files/i3/config` |
-| Top bar: i3 workspace numbers, Ghostty + Grok Bot + Firefox left, tray / volume / search / control centre / clock right, ends aligned to i3 gaps. NVIDIA profile: one bar per monitor, each listing only its own workspaces (tray on the LG only) | `modules/panel.nix`, `files/gtk-3.0/gtk.css` |
-| Workspace numbers: `i3-ws-bar` listens to i3 and writes the genmon slots (focused bright, other monitor's dimmer, rest dim, urgent red; click to switch) | `modules/i3.nix`, `files/bin/i3-ws-bar` |
-| Grok Bot from Cursor's apt repo, macOS-style icon | `bootstrap.sh`, `files/apt/`, `files/icons/hicolor/` |
+| Top bar: i3 workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Firefox left, tray / volume / search / control centre / clock right, ends aligned to i3 gaps. NVIDIA profile: one bar per monitor, each listing only its own workspaces (tray on the LG only) | `modules/panel.nix`, `files/gtk-3.0/gtk.css` |
+| Workspaces belong to a monitor: 1–3 the LG, 4–6 the ASUS (`Super+N` jumps to that monitor; `Super+Ctrl+←/→` sends a window across). Each bar always shows its own three numbers, read from i3's config by `i3-ws-bar` (focused bright, other monitor's dimmer, rest dim, empty faint, urgent red; click to switch) | `files/i3/config`, `modules/i3.nix`, `files/bin/i3-ws-bar` |
+| Grok Bot (Cursor's apt repo), ChatGPT with Codex (OpenAI's official .deb, which adds its signed apt repo for updates) and T3 Code nightly (GitHub, digest-checked), installed in the background; pinned on the bar with matching macOS squircle icons (`files/bin/make-app-icon` fits any app's artwork into Grok Bot's squircle) | `files/bin/install-desktop-apps`, `files/icons/hicolor/`, `modules/panel.nix` |
 | 144 DPI, Inter, WhiteSur-Mac icons, cursor 36 | `modules/xfce.nix`, `modules/theme.nix` |
-| picom: transparent bar, square corners, no shadows, notification slide | `modules/compositor.nix`, `files/picom/picom.conf` |
+| picom: macOS-style 15px rounded window corners (10pt at 1.5x), every unfocused window dimmed, transparent bar, no shadows, notification slide | `modules/compositor.nix`, `files/picom/picom.conf` |
 | dunst: one line in the centre of the bar, slides in/out | `modules/notifications.nix`, `files/dunst/dunstrc` |
 | Ghostty: Berkeley Mono (TX-02), size 10, padding, Superlogical tabs, terminfo | `modules/ghostty.nix`, `files/ghostty/` |
 | Telegram Desktop with tray icon sized to match | `modules/packages.nix`, `files/icons/WhiteSur-Mac/` |
@@ -47,8 +47,8 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 | Bash prompt | `modules/shell.nix`, `files/bash/prompt.sh` |
 | Tailscale (official apt repo, daemon enabled, user is operator, Tailscale SSH on; run `tailscale up` once per machine) | `bootstrap.sh`, `files/apt/tailscale.gpg` |
 | Power: monitors off after 10 idle minutes, system never sleeps (`caffeine` user service holds a logind sleep block) | `modules/power.nix` |
-| LG 4K@240 + ASUS 1.5x NVIDIA layout, set in the driver itself (`MetaModes`) with soft DPMS (`HardDPMS false`: sleeping monitors stay connected, so the layout is never lost); installed to `/etc/X11/xorg.conf.d/` by `bootstrap.sh` | `files/xorg/20-nvidia-desk.conf` (NVIDIA profile only) |
-| Backup: `monitor-layout-guard` re-applies the layout / re-seats the bars after a replug, only while the monitors are on and you have used them in the last minute, never forces a probe, backs off on failure, logs to `journalctl -t monitor-layout-guard` | `modules/monitors.nix`, `files/bin/monitor-layout-guard` |
+| LG 4K@240 + ASUS MB16FC at its native 1920x1200 (no driver scaling, bottom edges aligned), set in the driver itself (`MetaModes`) with soft DPMS (`HardDPMS false`: sleeping monitors stay connected, so the layout is never lost); installed to `/etc/X11/xorg.conf.d/` by `bootstrap.sh` | `files/xorg/20-nvidia-desk.conf` (NVIDIA profile only) |
+| `monitor-layout-guard`: keeps each bar on its own monitor (i3 docks a bar on whichever monitor it maps on, so after the panel re-maps one it can land on the wrong screen; the guard moves it back within seconds, restarting the panel only if that fails) and re-applies the layout after a replug, but only while the monitors are on and you have used them in the last minute. Never forces a driver probe, backs off on failure, logs to `journalctl -t monitor-layout-guard` | `modules/monitors.nix`, `files/bin/monitor-layout-guard` |
 
 ## Moving this machine onto the flake
 

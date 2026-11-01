@@ -4,8 +4,9 @@
 Every panel has nine genmon slots whose commands are
 `cat ~/.cache/i3-ws-bar/<OUTPUT>/<N>.genmon`, where OUTPUT is the xrandr/i3 output
 name the panel is pinned to (or `_all` for a single bar showing every output). A slot
-shows workspace N only while that workspace lives on OUTPUT, so each monitor's bar
-lists just its own workspaces (like i3bar).
+shows workspace N while that workspace lives on OUTPUT, and also (faint) while it doesn't
+exist yet but i3's config assigns it there (`workspace N output OUTPUT`), so each monitor's
+bar always lists exactly its own numbers.
 This daemon listens on the i3 IPC socket, rewrites slot files on workspace changes,
 and pushes changed slots to the panel with
 `xfce4-panel --plugin-event=genmon-<id>:refresh:bool:true`. The text font is the
@@ -17,11 +18,14 @@ CACHE = os.path.expanduser("~/.cache/i3-ws-bar")
 PANEL_RC = os.path.expanduser("~/.config/xfce4/panel")
 SLOT_RE = re.compile(r"i3-ws-bar/([^/\s]+)/(\d+)\.genmon")
 ALL_OUTPUTS = "_all"
-# Pango foreground per state: keyboard focus stands out, the other monitor's current is mid, rest dim
-STYLE = {"focused": 'alpha="100%"', "visible": 'alpha="70%"', "urgent": 'foreground="#ff5555"', "": 'alpha="45%"'}
+ASSIGN_RE = re.compile(r'^[ \t]*workspace[ \t]+"?(\d+)"?[ \t]+output[ \t]+([^#\n]+)', re.M)
+# Pango foreground per state: keyboard focus stands out, the other monitor's current is mid,
+# other workspaces dim, assigned-but-empty ones faintest
+STYLE = {"focused": 'alpha="100%"', "visible": 'alpha="70%"', "urgent": 'foreground="#ff5555"',
+         "": 'alpha="45%"', "empty": 'alpha="25%"'}
 
 MAGIC = b"i3-ipc"
-GET_WORKSPACES, SUBSCRIBE = 1, 2
+GET_WORKSPACES, SUBSCRIBE, GET_OUTPUTS, GET_CONFIG = 1, 2, 3, 9
 EVENT_BIT = 1 << 31
 SHUTDOWN_EVENT = 6
 
@@ -69,15 +73,33 @@ def slots():
     return found
 
 
+def assigned(i3):
+    """Workspace number -> output it would be created on, from i3's loaded config: the first
+    listed output that is active (i3's own rule); unassigned or no listed output active: absent."""
+    active = {o["name"] for o in i3.query(GET_OUTPUTS) if o.get("active")}
+    found = {}
+    for num, outputs in ASSIGN_RE.findall(i3.query(GET_CONFIG).get("config", "")):
+        first = next((o for o in outputs.split() if o.strip('"') in active), None)
+        if first:
+            found.setdefault(int(num), first.strip('"'))
+    return found
+
+
 def update(i3, last):
     meta = {w["num"]: w for w in i3.query(GET_WORKSPACES)}
+    home = assigned(i3)
     slot_ids = slots()
     for (output, num), plugin_id in slot_ids.items():
         ws = meta.get(num)
-        if ws is None or output not in (ALL_OUTPUTS, ws["output"]):
+        if ws is not None and output in (ALL_OUTPUTS, ws["output"]):
+            state = "urgent" if ws["urgent"] else "focused" if ws["focused"] else "visible" if ws["visible"] else ""
+        elif ws is None and output != ALL_OUTPUTS and home.get(num) == output:
+            state = "empty"
+        else:
+            state = None
+        if state is None:
             content = "<txt></txt>"  # empty output would make genmon show "XXX"
         else:
-            state = "urgent" if ws["urgent"] else "focused" if ws["focused"] else "visible" if ws["visible"] else ""
             content = (f"<txt><span {STYLE[state]}>{num}</span></txt>"
                        f"<txtclick>@i3msg@ -q workspace number {num}</txtclick>"
                        f"<tool>Workspace {num}</tool>")

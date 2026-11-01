@@ -1,0 +1,28 @@
+#!/bin/sh
+# Big desktop apps, installed in the background by bootstrap.sh (runs as root via systemd-run).
+#   Grok Bot: Cursor's apt repo (set up by bootstrap.sh)
+#   ChatGPT (incl. Codex): OpenAI's official .deb; it adds OpenAI's signed apt repo, so apt updates it
+#   T3 Code: latest nightly .deb from GitHub, checked against the release's sha256 digest
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+apt-get install -y grok-bot
+
+if ! dpkg -s chatgpt >/dev/null 2>&1; then
+  curl -fL --retry 3 -o "$tmp/chatgpt_amd64.deb" \
+    https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb
+  apt-get install -y "$tmp/chatgpt_amd64.deb"
+fi
+
+# shortcut: nightly is pinned to whatever is newest at install time; re-run this script to update
+rel=$(curl -fsSL "https://api.github.com/repos/pingdotgg/t3code/releases?per_page=10")
+asset=$(printf '%s' "$rel" | python3 -c '
+import json, sys
+r = next(r for r in json.load(sys.stdin) if r["prerelease"])
+a = next(a for a in r["assets"] if a["name"].endswith("-amd64.deb"))
+print(a["browser_download_url"], a["digest"].split(":", 1)[1])')
+url=${asset% *}; sha=${asset#* }
+curl -fL --retry 3 -o "$tmp/t3code.deb" "$url"
+echo "$sha  $tmp/t3code.deb" | sha256sum -c -
+apt-get install -y "$tmp/t3code.deb"

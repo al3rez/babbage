@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ChatGPT
+Comment=ChatGPT and Codex
+Exec=chatgpt %U
+Terminal=false
+Type=Application
+Icon=chatgpt
+StartupWMClass=ChatGPT
+Categories=Development;

@@ -45,12 +45,13 @@ fi
 sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on
 
-# Grok Bot is 112 MB from Cloudflare, which crawls over some IPv4 routes (~30 KB/s vs MB/s
-# over IPv6, measured from Bangkok), so it installs in the background while Nix runs.
-# Last apt step on purpose: it holds the apt lock until done. Progress: journalctl -u grok-bot-install
-systemctl is-active --quiet grok-bot-install ||
-  sudo systemd-run --unit=grok-bot-install --collect --setenv=DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y grok-bot
+# Grok Bot, ChatGPT (with Codex) and T3 Code nightly are ~1 GB together, and Grok Bot's CDN
+# crawls over some IPv4 routes (~30 KB/s vs MB/s over IPv6, measured from Bangkok), so they
+# install in the background while Nix runs. Last apt step on purpose: it holds the apt lock
+# until done. Progress: journalctl -fu desktop-apps-install
+sudo install -Dm755 "$here/files/bin/install-desktop-apps" /usr/local/sbin/install-desktop-apps
+systemctl is-active --quiet desktop-apps-install ||
+  sudo systemd-run --unit=desktop-apps-install --collect /usr/local/sbin/install-desktop-apps
 
 # 2. Nix (flakes enabled by the Determinate installer)
 if ! command -v nix >/dev/null 2>&1; then
@@ -64,5 +65,5 @@ nix run home-manager/master -- switch -b backup --flake "$here#$profile"
 
 echo
 echo "Done. Log out and back in to start the i3 + XFCE session."
-systemctl is-active --quiet grok-bot-install && echo "Grok Bot is still downloading in the background (journalctl -fu grok-bot-install)."
+systemctl is-active --quiet desktop-apps-install && echo "Grok Bot, ChatGPT and T3 Code are still installing in the background (journalctl -fu desktop-apps-install)."
 tailscale status >/dev/null 2>&1 || echo "Then run 'tailscale up' once to join your tailnet."
