@@ -90,8 +90,12 @@ def update(i3, last):
             f.write(content)
         os.replace(path + ".tmp", path)
         last[(output, num)] = content
-        # run (not Popen): waiting reaps the child, so no zombies pile up in this long-lived daemon
-        subprocess.run(["@xfce4panel@", f"--plugin-event=genmon-{plugin_id}:refresh:bool:true"],
+        # straight D-Bus, not `xfce4-panel --plugin-event`: that pops up an error dialog when the
+        # panel isn't on the bus yet (every login, i3 starts us first). The panel reads the files
+        # itself when it comes up. run (not Popen): waiting reaps the child, no zombies pile up
+        subprocess.run(["@gdbus@", "call", "--session", "--dest", "org.xfce.Panel",
+                        "--object-path", "/org/xfce/Panel", "--method", "org.xfce.Panel.PluginEvent",
+                        f"genmon-{plugin_id}", "refresh", "<true>"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
 
 

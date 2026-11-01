@@ -4,8 +4,8 @@ let
   # workspace numbers for the xfce4-panel bars (genmon slots are set up in modules/panel.nix)
   wsBar = pkgs.writeScript "i3-ws-bar"
     (builtins.replaceStrings
-      [ "@python@" "@i3@" "@i3msg@" "@xfce4panel@" ]
-      [ "${pkgs.python3}/bin/python3" "${pkgs.i3}/bin/i3" "${pkgs.i3}/bin/i3-msg" "/usr/bin/xfce4-panel" ]
+      [ "@python@" "@i3@" "@i3msg@" "@gdbus@" ]
+      [ "${pkgs.python3}/bin/python3" "${pkgs.i3}/bin/i3" "${pkgs.i3}/bin/i3-msg" "${pkgs.glib.bin}/bin/gdbus" ]
       (builtins.readFile ../files/bin/i3-ws-bar));
 in
 {
