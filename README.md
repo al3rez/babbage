@@ -1,10 +1,10 @@
-# alborz
+# devbox
 
 Debian 13 + XFCE running i3 tiling, with a flat macOS-style menu bar, Ghostty and
 notifications that slide into the bar. One command takes a fresh Debian install there,
 built with a Nix Home Manager flake.
 
-![alborz at 4K](docs/screenshot.png)
+![devbox at 4K](docs/screenshot.png)
 
 <sub>Full 3840×2160 screenshot from a fresh Debian 13 VM right after `bootstrap.sh`: Firefox, Telegram
 and Ghostty tiled by i3, a notification in the bar. Below, the two top halves at 1:1 (no scaling).</sub>
@@ -19,7 +19,7 @@ down in and back up out (recorded in the VM at 60 fps, real speed, then 4× slow
 ![notification sliding into the menu bar](docs/notification.gif)
 
 ```sh
-git clone https://github.com/al3rez/alborz ~/.config/home-manager
+git clone https://github.com/al3rez/devbox ~/.config/home-manager
 ~/.config/home-manager/bootstrap.sh              # NVIDIA machine (LG 4K + ASUS layout)
 ~/.config/home-manager/bootstrap.sh al3rez-vm    # anything else (Mesa)
 ```
