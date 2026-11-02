@@ -9,25 +9,25 @@
 #clock-8 button, #clock-8, #clock-63 button, #clock-63 { padding-right: 8px; }
 #launcher-27 button, #launcher-56 button { padding-left: 8px; }
 
-/* menus (tray right-click, panel, app context menus): macOS light, as macOS draws them over a
-   bright wallpaper. Menu windows are opaque (24-bit), so the colour is solid here and picom
+/* menus (tray right-click, panel, app context menus): the same light popover look as the
+   Tailscale panel (files/bin/tailscale-tray), as macOS menu-bar popovers look over a bright
+   wallpaper: 12pt card, roomy rounded rows, soft grey hover. Menu windows are opaque (24-bit), so the colour is solid here and picom
    makes the whole window translucent, rounds it and blurs what's behind (files/picom/picom.conf).
    Colours are set explicitly and prefixed with window.popup: the bar's white-label rule above
    also reaches the panel's own menus and would otherwise win. */
 menu, .menu, .context-menu {
   background-color: #f4f4f6; color: rgba(0, 0, 0, 0.85);
-  font-family: "Inter"; padding: 5px; border: 1px solid rgba(0, 0, 0, 0.10); border-radius: 9px; }
-menu menuitem, window.popup menu menuitem { min-height: 0; padding: 4px 10px; border-radius: 5px; color: rgba(0, 0, 0, 0.85);
+  font-family: "Inter"; padding: 12px; border: 1px solid rgba(0, 0, 0, 0.10); border-radius: 18px; }
+menu menuitem, window.popup menu menuitem { min-height: 0; padding: 10px 12px; border-radius: 10px; color: rgba(0, 0, 0, 0.85);
   text-shadow: none; -gtk-icon-shadow: none; }
 menu menuitem label, window.popup menu menuitem label, window.popup menu menuitem box label { color: inherit; }
 menu menuitem accelerator { color: rgba(0, 0, 0, 0.40); }
-menu menuitem:hover, window.popup menu menuitem:hover { background-color: #0a84ff; color: #ffffff; }
-menu menuitem:hover accelerator { color: rgba(255, 255, 255, 0.75); }
+menu menuitem:hover, window.popup menu menuitem:hover { background-color: rgba(0, 0, 0, 0.055); color: rgba(0, 0, 0, 0.85); }
 menu menuitem:disabled, menu menuitem:disabled label, window.popup menu menuitem:disabled label { color: rgba(0, 0, 0, 0.28); }
-menu separator { min-height: 1px; margin: 5px 10px; background-color: rgba(0, 0, 0, 0.10); }
+menu separator { min-height: 1px; margin: 9px 12px; background-color: rgba(0, 0, 0, 0.08); }
 menu menuitem check, menu menuitem radio { color: inherit; background: none; border: none; box-shadow: none; }
 menu menuitem arrow { color: rgba(0, 0, 0, 0.45); }
-menu menuitem:hover arrow { color: #ffffff; }
+menu menuitem:hover arrow { color: rgba(0, 0, 0, 0.6); }
 window.popup, .popup { background-color: transparent; }
 
 /* the tray's "show hidden icons" arrow (it hides the Electron icon, modules/panel.nix);

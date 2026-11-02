@@ -20,28 +20,22 @@ let
 
     '';
   }) 9;
-  # Tailscale beside the tray, drawn like the tray's icons (files/bin/tailscale-tray).
-  # The CLI is Debian's, matching its tailscaled.
-  tailscaleTray = pkgs.writeScript "tailscale-tray"
-    (builtins.replaceStrings
-      [ "@python@" "@tailscale@" "@rofi@" "@theme@" "@xclip@" "@icons@" ]
-      [ "${pkgs.python3}/bin/python3" "/usr/bin/tailscale" "${pkgs.rofi}/bin/rofi"
-        "${../files/rofi/launcher.rasi}" "${pkgs.xclip}/bin/xclip" "${../files/icons/tailscale}" ]
-      (builtins.readFile ../files/bin/tailscale-tray));
-  tailscaleRc = {
-    name = "genmon-69.rc";
-    path = pkgs.writeText "genmon-69.rc" ''
-      Command=${tailscaleTray} status
-      UseLabel=0
-      Text=
-      UpdatePeriod=5000
-      Font=Inter 10
-
-    '';
-  };
+  # Tailscale in the tray (files/bin/tailscale-tray): a StatusNotifierItem with a white themed
+  # icon; clicking it opens a macOS-style popover. Nix GTK + typelibs; the tailscale CLI is
+  # Debian's, matching its tailscaled.
+  tailscaleTray = pkgs.writeShellScript "tailscale-tray" ''
+    export GI_TYPELIB_PATH=${lib.makeSearchPathOutput "out" "lib/girepository-1.0"
+      (with pkgs; [ gtk3 gdk-pixbuf pango atk harfbuzz glib gobject-introspection ])}
+    unset GTK_MODULES GTK_PATH   # Debian's GTK modules don't load into Nix's GTK
+    export GDK_PIXBUF_MODULE_FILE=${pkgs.librsvg.out}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache   # SVG icons
+    export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
+    export TAILSCALE=/usr/bin/tailscale XCLIP=${pkgs.xclip}/bin/xclip
+    export TAILSCALE_TRAY_ICONS=${../files/icons/tailscale}
+    exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/tailscale-tray} "$@"
+  '';
 
   genmonSlots = pkgs.linkFarm "genmon-slots"
-    ([ tailscaleRc ] ++ wsRcFiles 35 primaryOutput ++ lib.optionals dual (wsRcFiles 46 "DP-4"));
+    (wsRcFiles 35 primaryOutput ++ lib.optionals dual (wsRcFiles 46 "DP-4"));
 
   separator = id: expand: {
     "plugins/plugin-${toString id}" = "separator";
@@ -90,10 +84,9 @@ in
   xfconf.settings.xfce4-panel = {
     "panels" = if dual then [ 1 2 ] else [ 1 ];
     "panels/dark-mode" = true;
-    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 29 3 69 6 21 25 26 8 33 ];
+    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 29 3 6 21 25 26 8 33 ];
 
     # status area (tray and volume keys exist only once, on the primary bar)
-    "plugins/plugin-69" = "genmon";   # Tailscale, left of the tray
     "plugins/plugin-6" = "systray";
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
@@ -136,6 +129,13 @@ in
   // clock 63);
 
   xdg.configFile = {
+    "autostart/tailscale-tray.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Tailscale tray
+      Exec=${tailscaleTray}
+      X-GNOME-Autostart-enabled=true
+    '';
     "xfce4/panel/launcher-27/ghostty.desktop".text = ghosttyDesktop;
     "xfce4/panel/launcher-34/grok-bot.desktop".source = ../files/panel/grok-bot.desktop;
     "xfce4/panel/launcher-65/chatgpt.desktop".source = ../files/panel/chatgpt.desktop;
