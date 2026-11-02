@@ -8,3 +8,32 @@
 /* align menu-bar ends with i3 window edges */
 #clock-8 button, #clock-8, #clock-63 button, #clock-63 { padding-right: 8px; }
 #launcher-27 button, #launcher-56 button { padding-left: 8px; }
+
+/* menus (tray right-click, panel, app context menus): macOS light, as macOS draws them over a
+   bright wallpaper. Menu windows are opaque (24-bit), so the colour is solid here and picom
+   makes the whole window translucent, rounds it and blurs what's behind (files/picom/picom.conf).
+   Colours are set explicitly and prefixed with window.popup: the bar's white-label rule above
+   also reaches the panel's own menus and would otherwise win. */
+menu, .menu, .context-menu {
+  background-color: #f4f4f6; color: rgba(0, 0, 0, 0.85);
+  font-family: "Inter"; padding: 5px; border: 1px solid rgba(0, 0, 0, 0.10); border-radius: 9px; }
+menu menuitem, window.popup menu menuitem { min-height: 0; padding: 4px 10px; border-radius: 5px; color: rgba(0, 0, 0, 0.85);
+  text-shadow: none; -gtk-icon-shadow: none; }
+menu menuitem label, window.popup menu menuitem label, window.popup menu menuitem box label { color: inherit; }
+menu menuitem accelerator { color: rgba(0, 0, 0, 0.40); }
+menu menuitem:hover, window.popup menu menuitem:hover { background-color: #0a84ff; color: #ffffff; }
+menu menuitem:hover accelerator { color: rgba(255, 255, 255, 0.75); }
+menu menuitem:disabled, menu menuitem:disabled label, window.popup menu menuitem:disabled label { color: rgba(0, 0, 0, 0.28); }
+menu separator { min-height: 1px; margin: 5px 10px; background-color: rgba(0, 0, 0, 0.10); }
+menu menuitem check, menu menuitem radio { color: inherit; background: none; border: none; box-shadow: none; }
+menu menuitem arrow { color: rgba(0, 0, 0, 0.45); }
+menu menuitem:hover arrow { color: #ffffff; }
+window.popup, .popup { background-color: transparent; }
+
+/* the tray's "show hidden icons" arrow (it hides the Electron icon, modules/panel.nix);
+   tray items are buttons named sn-button, the arrow is the only other button. GTK3 CSS
+   can't remove a widget, so shrink it to nothing */
+#systray-6 button:not(#sn-button) { min-width: 0; min-height: 0; padding: 0; margin: 0; border: none;
+  color: transparent; -gtk-icon-source: none; -gtk-icon-transform: scale(0); opacity: 0; }
+/* it still keeps a few pixels; take them back from the volume button next to it */
+#pulseaudio-21 button { padding-left: 0; }

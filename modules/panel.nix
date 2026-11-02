@@ -97,6 +97,9 @@ in
     "plugins/plugin-6" = "systray";
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
+    # Electron apps (ChatGPT) put a fixed full-colour bitmap in the tray that can't be themed
+    # like the white glyphs; they're pinned on the bar anyway
+    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 
