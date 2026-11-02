@@ -2,9 +2,9 @@
 set $mod Mod4
 font pango:Inter 10
 
-# --- look: flat 1px white border on every window (focus is shown by picom dimming the rest), no title bars, gaps
-default_border pixel 1
-default_floating_border pixel 1
+# --- look: no borders or title bars (picom dims unfocused windows to show focus), gaps
+default_border none
+default_floating_border none
 hide_edge_borders none
 gaps inner 12
 gaps outer 0
