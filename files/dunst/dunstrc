@@ -19,7 +19,6 @@
     corner_radius = 0
     padding = 0
     horizontal_padding = 12
-    text_icon_padding = 10
     separator_height = 0
     progress_bar = true
     progress_bar_height = 6
@@ -40,11 +39,8 @@
     hide_duplicate_count = true
     show_indicators = no
 
-    icon_position = left
-    enable_recursive_icon_lookup = true
-    icon_theme = "WhiteSur-Mac, WhiteSur, hicolor"
-    min_icon_size = 22
-    max_icon_size = 22
+    # text only: no app icon
+    icon_position = off
 
     # history is kept, just out of sight (Super+` brings it back)
     sticky_history = no

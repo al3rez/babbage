@@ -41,7 +41,7 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 | Raycast-style launcher on `Super+Space`: rofi with a frosted, rounded theme laid out like Raycast (search bar with `Ask AI [Tab]`, Favorites / Suggestions / Applications sections, "Application" on the right of each row, footer with `Open Application ↵`). Fuzzy search; Enter opens, Tab sends the typed text to ChatGPT. Suggestions are the apps you open most from it | `files/bin/launcher`, `files/rofi/launcher.rasi`, `modules/i3.nix`, `files/picom/picom.conf` |
 | 144 DPI, Inter, WhiteSur-Mac icons, cursor 36 | `modules/xfce.nix`, `modules/theme.nix` |
 | picom: macOS-style 15px rounded window corners (10pt at 1.5x), every unfocused window dimmed, transparent bar, notification slide; frosted glass (blur) only behind the launcher and menus. Menus (tray right-click, panel, apps) styled like macOS light menus: frosted, rounded, dark text, blue highlight. Tray shows only white glyphs: Electron apps' colour tray icons (ChatGPT) are hidden | `modules/compositor.nix`, `files/picom/picom.conf`, `files/gtk-3.0/gtk.css`, `modules/panel.nix` |
-| dunst: one line in the centre of the bar, slides in/out | `modules/notifications.nix`, `files/dunst/dunstrc` |
+| dunst: one line in the centre of the bar, text only (no app icon), slides in/out | `modules/notifications.nix`, `files/dunst/dunstrc` |
 | Ghostty: Berkeley Mono (TX-02), size 10, padding, Superlogical tabs, terminfo | `modules/ghostty.nix`, `files/ghostty/` |
 | Telegram Desktop with tray icon sized to match | `modules/packages.nix`, `files/icons/WhiteSur-Mac/` |
 | Wallpaper (wallhaven gp7mq3, hash-pinned) | `home.nix` |
