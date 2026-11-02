@@ -1,0 +1,32 @@
+#!/bin/sh
+# Pinned app click (modules/panel.nix): focus-or-launch WM_CLASS COMMAND...
+#   click          focus the app's window, wherever it is (any workspace, any monitor)
+#   no window yet  start the app
+#   double-click   start a new window (unless the first click just started one)
+# The class match is case-insensitive and unanchored: ChatGPT's window is "Chatgpt",
+# T3 Code's is "com.t3tools.T3Code".
+cls=$1
+shift
+stamp="${XDG_RUNTIME_DIR:-/tmp}/focus-or-launch-$(printf %s "$cls" | tr -c 'A-Za-z0-9' _)"
+now=$(date +%s%N)
+read -r last action 2>/dev/null < "$stamp" || { last=0; action=; }
+
+if [ $((now - ${last:-0})) -lt 400000000 ]; then   # second click of a double-click
+  # the first click may still be asking i3; wait for its answer (at most ~0.5s)
+  n=0
+  while [ "$action" = pending ] && [ $n -lt 25 ]; do
+    sleep 0.02; n=$((n + 1))
+    read -r _ action 2>/dev/null < "$stamp"
+  done
+  printf '%s done\n' "$now" > "$stamp"
+  [ "$action" = focused ] && exec "$@"   # it had only focused: now open a new one
+  exit 0                                  # it had just started the app: don't start two
+fi
+
+printf '%s pending\n' "$now" > "$stamp"
+if @i3msg@ -q "[class=\"(?i)$cls\"] focus" 2>/dev/null; then
+  printf '%s focused\n' "$now" > "$stamp"
+else
+  printf '%s launched\n' "$now" > "$stamp"
+  exec "$@"
+fi

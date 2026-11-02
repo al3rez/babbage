@@ -30,6 +30,7 @@ let
     export GDK_PIXBUF_MODULE_FILE=${pkgs.librsvg.out}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache   # SVG icons
     export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
     export TAILSCALE=/usr/bin/tailscale XCLIP=${pkgs.xclip}/bin/xclip
+    export I3=${pkgs.i3}/bin/i3 XFCONF_QUERY=/usr/bin/xfconf-query
     export MENUBAR_ICONS=${../files/icons/tailscale}
     exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/menubar-popovers} "$@"
   '';
@@ -76,6 +77,38 @@ let
     StartupWMClass=com.mitchellh.ghostty
     Terminal=false
   '';
+
+  # Pinned apps: a click focuses the app's window wherever it is, starts it if it has none,
+  # and a double-click opens a new window (files/bin/focus-or-launch). Each launcher's Exec
+  # goes through that script, matched on the entry's StartupWMClass.
+  focusOrLaunch = pkgs.writeShellScript "focus-or-launch"
+    (builtins.replaceStrings [ "@i3msg@" ] [ "${pkgs.i3}/bin/i3-msg" ]
+      (builtins.readFile ../files/bin/focus-or-launch));
+  pinnedEntry = text:
+    let
+      lines = lib.splitString "\n" text;
+      wmclass = lib.removePrefix "StartupWMClass=" (lib.findFirst (lib.hasPrefix "StartupWMClass=") "" lines);
+    in
+    lib.concatMapStringsSep "\n"
+      (l: if lib.hasPrefix "Exec=" l then "Exec=${focusOrLaunch} ${wmclass} ${lib.removePrefix "Exec=" l}" else l)
+      lines;
+  pinned = {
+    "ghostty.desktop" = ghosttyDesktop;
+    "grok-bot.desktop" = builtins.readFile ../files/panel/grok-bot.desktop;
+    "chatgpt.desktop" = builtins.readFile ../files/panel/chatgpt.desktop;
+    "t3code.desktop" = builtins.readFile ../files/panel/t3code.desktop;
+    "firefox.desktop" = builtins.readFile ../files/panel/launcher-29/firefox.desktop;
+  };
+  # launcher plugin id -> file; real files, not store links: the launcher plugin copies a file
+  # it can't write to a numbered copy and then never sees later changes
+  pinnedLaunchers = { "27" = "ghostty.desktop"; "34" = "grok-bot.desktop"; "65" = "chatgpt.desktop";
+                      "66" = "t3code.desktop"; "29" = "firefox.desktop"; }
+    // lib.optionalAttrs dual { "56" = "ghostty.desktop"; "57" = "grok-bot.desktop";
+                               "67" = "chatgpt.desktop"; "68" = "t3code.desktop"; "58" = "firefox.desktop"; };
+  pinnedFarm = pkgs.linkFarm "pinned-launchers" (lib.mapAttrsToList (id: file: {
+    name = "launcher-${id}/${file}";
+    path = pkgs.writeText file (pinnedEntry pinned.${file});
+  }) pinnedLaunchers);
 in
 {
   # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Firefox on the left,
@@ -146,22 +179,23 @@ in
       NoDisplay=true
       X-GNOME-Autostart-enabled=true
     '';
-    "xfce4/panel/launcher-27/ghostty.desktop".text = ghosttyDesktop;
-    "xfce4/panel/launcher-34/grok-bot.desktop".source = ../files/panel/grok-bot.desktop;
-    "xfce4/panel/launcher-65/chatgpt.desktop".source = ../files/panel/chatgpt.desktop;
-    "xfce4/panel/launcher-66/t3code.desktop".source = ../files/panel/t3code.desktop;
-    "xfce4/panel/launcher-29/firefox.desktop".source = ../files/panel/launcher-29/firefox.desktop;
     "xfce4/panel/launcher-25/spotlight.desktop".source = ../files/panel/launcher-25/spotlight.desktop;
     "xfce4/panel/launcher-26/control-center.desktop".source = ../files/panel/launcher-26/control-center.desktop;
   } // lib.optionalAttrs dual {
-    "xfce4/panel/launcher-56/ghostty.desktop".text = ghosttyDesktop;
-    "xfce4/panel/launcher-57/grok-bot.desktop".source = ../files/panel/grok-bot.desktop;
-    "xfce4/panel/launcher-67/chatgpt.desktop".source = ../files/panel/chatgpt.desktop;
-    "xfce4/panel/launcher-68/t3code.desktop".source = ../files/panel/t3code.desktop;
-    "xfce4/panel/launcher-58/firefox.desktop".source = ../files/panel/launcher-29/firefox.desktop;
     "xfce4/panel/launcher-61/spotlight.desktop".source = ../files/panel/launcher-25/spotlight.desktop;
     "xfce4/panel/launcher-62/control-center.desktop".source = ../files/panel/launcher-26/control-center.desktop;
   };
+
+  # pinned launchers as real files (see pinnedFarm); the plugin notices changed files itself
+  home.activation.pinnedLaunchers = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    for f in ${pinnedFarm}/launcher-*/*.desktop; do
+      dest="${config.xdg.configHome}/xfce4/panel/''${f#${pinnedFarm}/}"
+      if [ -L "$dest" ] || ! ${pkgs.diffutils}/bin/cmp -s "$f" "$dest"; then
+        run rm -f "$dest"
+        run install -Dm644 "$f" "$dest"
+      fi
+    done
+  '';
 
   # Pick up panel changes in a running session. genmon keeps its settings in memory and
   # writes them back to genmon-N.rc when the panel exits, so the workspace slot files are

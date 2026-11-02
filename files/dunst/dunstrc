@@ -85,3 +85,9 @@
 [fullscreen_critical_still_shows]
     urgency = critical
     fullscreen = show
+
+# tell the menu bar which app sent it: a dot under that app's pinned icon until you focus it
+# (files/bin/menubar-popovers; @badgehook@ is filled in by modules/notifications.nix)
+[menubar_badge]
+    appname = "*"
+    script = @badgehook@

@@ -13,13 +13,22 @@ menu, and opens one popover style for all of them:
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
     submenus expand in place, disabled items greyed; choosing an item sends the click back.
 
+Pinned apps also get a notification dot, like the macOS Dock: dunst calls Notified(appname)
+over D-Bus (io.github.al3rez.Menubar, hooked up in modules/notifications.nix); if the app is
+pinned on the bar and not focused, a small white dot appears under its icon on every bar,
+until one of its windows gets focus (i3 window events). Icon positions come from AT-SPI (the
+panel's plugin slots, in plugin-ids order) and launcher-N/*.desktop says which app each is.
+
 The popover is a solid window; picom rounds it, makes it slightly translucent and frosts it
 (files/picom/picom.conf, class Menubar-popover). Escape or a click outside closes it.
 Runs under modules/panel.nix's wrapper (Nix GTK + typelibs), started from XDG autostart.
 """
+import configparser
+import glob
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 
@@ -28,11 +37,22 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
 TAILSCALE = os.environ.get("TAILSCALE", "tailscale")
 ICONS = os.environ["MENUBAR_ICONS"]
 XCLIP = os.environ.get("XCLIP", "xclip")
+I3 = os.environ.get("I3", "i3")
+XFCONF = os.environ.get("XFCONF_QUERY", "xfconf-query")
+PANEL_DIR = os.path.expanduser("~/.config/xfce4/panel")
+BADGE_BUS = "io.github.al3rez.Menubar"
+BADGE_XML = """
+<node>
+  <interface name="io.github.al3rez.Menubar">
+    <method name="Notified"><arg name="app" type="s" direction="in"/></method>
+  </interface>
+</node>"""
 ADMIN = "https://login.tailscale.com/admin/machines"
 POLL = 5          # seconds between Tailscale status checks
 BAR = 36          # menu bar height (px)
@@ -107,6 +127,7 @@ def css(scale):
     px = lambda v: f"{round(v * scale)}px"
     return f"""
     window.menubar-popover {{ background-color: #f6f6f8; }}
+    window.menubar-badge {{ background-color: #ffffff; }}
     .card {{ background-color: #f6f6f8; border-radius: {px(12)};
              border: 1px solid rgba(0, 0, 0, 0.10); padding: {px(8)}; }}
     .card, .card label {{ color: rgba(0, 0, 0, 0.85); font-family: "Inter"; }}
@@ -501,6 +522,182 @@ class ProxyItem(TrayItem):
         self.app.popover.rebuild()
 
 
+# ---- notification dots under pinned apps ----------------------------------------------------
+def norm(text):
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
+
+
+def pinned_launchers():
+    """{plugin id: {name, exec, wmclass}} for every launcher plugin on the bar."""
+    out = {}
+    for path in glob.glob(os.path.join(PANEL_DIR, "launcher-*", "*.desktop")):
+        try:
+            plugin_id = int(path.split("launcher-")[1].split("/")[0])
+            cp = configparser.RawConfigParser(strict=False, interpolation=None)
+            cp.optionxform = str
+            cp.read(path, encoding="utf-8")
+            e = cp["Desktop Entry"]
+        except (ValueError, configparser.Error, KeyError, UnicodeDecodeError):
+            continue
+        out.setdefault(plugin_id, {"name": e.get("Name", ""),
+                                   "exec": os.path.basename((e.get("Exec", "") or " ").split()[0]),
+                                   "wmclass": e.get("StartupWMClass", "")})
+    return out
+
+
+def app_key(entry):
+    return norm(entry["wmclass"] or entry["name"])
+
+
+def panel_plugin_ids():
+    """[[plugin id, ...] per bar], in the order the panel lays them out."""
+    def query(prop):
+        try:
+            out = subprocess.run([XFCONF, "-c", "xfce4-panel", "-p", prop], capture_output=True,
+                                 text=True, timeout=3).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        # "Value is an array with N items:" then one value per line
+        return [int(line) for line in map(str.strip, out.splitlines()) if line.isdigit()]
+    return [query(f"/panels/panel-{n}/plugin-ids") for n in query("/panels")]
+
+
+def plugin_slots():
+    """{plugin id: [(x, y, w, h) on screen, ...]} read from the panel over AT-SPI: each bar's
+    plugin box has one child per plugin, in plugin-ids order."""
+    layouts = [ids for ids in panel_plugin_ids() if ids]
+    slots = {}
+    desk = Atspi.get_desktop(0)
+    for i in range(desk.get_child_count()):
+        app = desk.get_child_at_index(i)
+        if not app or app.get_name() != "xfce4-panel":
+            continue
+        queue = [app]
+        while queue:
+            node = queue.pop(0)
+            try:
+                n = node.get_child_count()
+            except GLib.Error:
+                continue
+            match = [ids for ids in layouts if len(ids) == n and n > 3]
+            if match:
+                kids = [node.get_child_at_index(k) for k in range(n)]
+                for plugin_id, kid in zip(match[0], kids):
+                    try:
+                        e = kid.get_extents(Atspi.CoordType.SCREEN)
+                    except GLib.Error:
+                        continue
+                    if e.width > 1:
+                        slots.setdefault(plugin_id, []).append((e.x, e.y, e.width, e.height))
+                layouts.remove(match[0])
+                continue
+            queue.extend(c for c in (node.get_child_at_index(k) for k in range(n)) if c)
+    return slots
+
+
+class Badges:
+    def __init__(self, app):
+        self.app = app
+        self.lit = set()        # app keys with an unseen notification
+        self.focused = ""       # norm(class + instance) of the focused window
+        self.dots = []
+        info = Gio.DBusNodeInfo.new_for_xml(BADGE_XML).interfaces[0]
+        app.bus.register_object("/menubar/badges", info, self.on_call, None, None)
+        Gio.bus_own_name_on_connection(app.bus, BADGE_BUS, Gio.BusNameOwnerFlags.NONE, None, None)
+        self.i3_connect()
+
+    def on_call(self, _c, _s, _p, _i, method, params, invocation):
+        if method == "Notified":
+            self.notified(params.unpack()[0])
+        invocation.return_value(None)
+
+    def owner(self, appname):
+        """The pinned app a notification came from, if any."""
+        a = norm(appname)
+        if not a:
+            return None
+        for entry in pinned_launchers().values():
+            if a in (norm(entry["name"]), norm(entry["exec"]), norm(entry["wmclass"])) \
+                    or norm(entry["name"]).startswith(a):
+                return app_key(entry)
+        return None
+
+    def notified(self, appname):
+        key = self.owner(appname)
+        if key and key not in self.focused:
+            self.lit.add(key)
+            self.redraw()
+
+    def seen(self, window_class, instance):
+        self.focused = norm(window_class) + norm(instance)
+        cleared = {k for k in self.lit if k and k in self.focused}
+        if cleared:
+            self.lit -= cleared
+            self.redraw()
+
+    def redraw(self):
+        for dot in self.dots:
+            dot.destroy()
+        self.dots = []
+        if not self.lit:
+            return
+        size = max(4, round(4 * self.app.scale))
+        launchers = pinned_launchers()
+        for plugin_id, places in plugin_slots().items():
+            entry = launchers.get(plugin_id)
+            if not entry or app_key(entry) not in self.lit:
+                continue
+            for x, y, w, h in places:
+                # centred under the icon (the last 44px of the slot; the first launcher carries
+                # extra left padding), in the gap between the bar and the windows
+                cx = x + w - min(w, round(44 * self.app.scale / 1.5)) // 2
+                dot = Gtk.Window(type=Gtk.WindowType.POPUP)
+                dot.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+                dot.set_wmclass("menubar-badge", "Menubar-badge")
+                dot.get_style_context().add_class("menubar-badge")
+                dot.set_size_request(size, size)
+                dot.resize(size, size)
+                dot.move(cx - size // 2, y + h + round(2 * self.app.scale))
+                dot.show_all()
+                self.dots.append(dot)
+
+    # i3: watch window focus over its IPC socket
+    def i3_connect(self):
+        try:
+            path = subprocess.run([I3, "--get-socketpath"], capture_output=True, text=True, timeout=3).stdout.strip()
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(path)
+        except (OSError, subprocess.TimeoutExpired):
+            GLib.timeout_add_seconds(5, lambda: self.i3_connect() and False)
+            return
+        payload = b'["window"]'
+        sock.sendall(b"i3-ipc" + struct.pack("<II", len(payload), 2) + payload)   # SUBSCRIBE
+        self.i3_sock, self.i3_buf = sock, b""
+        GLib.io_add_watch(sock.fileno(), GLib.PRIORITY_DEFAULT, GLib.IO_IN | GLib.IO_HUP, self.i3_read)
+
+    def i3_read(self, _fd, cond):
+        data = self.i3_sock.recv(65536) if cond & GLib.IO_IN else b""
+        if not data:
+            self.i3_sock.close()
+            GLib.timeout_add_seconds(2, lambda: self.i3_connect() and False)
+            return False
+        self.i3_buf += data
+        while len(self.i3_buf) >= 14:
+            length, kind = struct.unpack("<II", self.i3_buf[6:14])
+            if len(self.i3_buf) < 14 + length:
+                break
+            body, self.i3_buf = self.i3_buf[14:14 + length], self.i3_buf[14 + length:]
+            if kind == 0x80000003:   # window event
+                try:
+                    ev = json.loads(body)
+                except ValueError:
+                    continue
+                if ev.get("change") == "focus":
+                    props = (ev.get("container") or {}).get("window_properties") or {}
+                    self.seen(props.get("class", ""), props.get("instance", ""))
+        return True
+
+
 # ---- the daemon -----------------------------------------------------------------------------
 class App:
     def __init__(self):
@@ -514,6 +711,7 @@ class App:
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
         self.sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
         self.tailscale = TailscaleItem(self)
+        self.badges = Badges(self)
         self.proxies = {}   # tray Id -> ProxyItem
         self.bus.signal_subscribe(WATCHER[0], WATCHER[2], None, WATCHER[1], None,
                                   Gio.DBusSignalFlags.NONE, self.on_watcher_signal)
