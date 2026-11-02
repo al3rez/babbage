@@ -37,7 +37,7 @@ from Xlib.ext import dpms, randr
 
 METAMODE = (
     "DP-2: 3840x2160_240 +0+0 {ForceCompositionPipeline=On}, "
-    "DP-4: 1920x1200_60 +3840+960 {ForceCompositionPipeline=On}"
+    "DP-4: 1920x1200_75 +3840+960 {ForceCompositionPipeline=On}"
 )
 WANT = {"DP-2": (0, 0, 3840, 2160), "DP-4": (3840, 960, 1920, 1200)}
 BAR_HEIGHT = 36

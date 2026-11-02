@@ -47,7 +47,7 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 | Bash prompt | `modules/shell.nix`, `files/bash/prompt.sh` |
 | Tailscale (official apt repo, daemon enabled, user is operator, Tailscale SSH on; run `tailscale up` once per machine) | `bootstrap.sh`, `files/apt/tailscale.gpg` |
 | Power: monitors off after 10 idle minutes, system never sleeps (`caffeine` user service holds a logind sleep block) | `modules/power.nix` |
-| LG 4K@240 + ASUS MB16FC at its native 1920x1200 (no driver scaling, bottom edges aligned), set in the driver itself (`MetaModes`) with soft DPMS (`HardDPMS false`: sleeping monitors stay connected, so the layout is never lost); installed to `/etc/X11/xorg.conf.d/` by `bootstrap.sh` | `files/xorg/20-nvidia-desk.conf` (NVIDIA profile only) |
+| LG 4K@240 + ASUS MB16FC at its native 1920x1200@75 (no driver scaling, bottom edges aligned), set in the driver itself (`MetaModes`) with soft DPMS (`HardDPMS false`: sleeping monitors stay connected, so the layout is never lost); installed to `/etc/X11/xorg.conf.d/` by `bootstrap.sh` | `files/xorg/20-nvidia-desk.conf` (NVIDIA profile only) |
 | `monitor-layout-guard`: keeps each bar on its own monitor (i3 docks a bar on whichever monitor it maps on, so after the panel re-maps one it can land on the wrong screen; the guard moves it back within seconds, restarting the panel only if that fails) and re-applies the layout after a replug, but only while the monitors are on and you have used them in the last minute. Never forces a driver probe, backs off on failure, logs to `journalctl -t monitor-layout-guard` | `modules/monitors.nix`, `files/bin/monitor-layout-guard` |
 
 ## Moving this machine onto the flake
