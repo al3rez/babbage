@@ -32,6 +32,7 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/m
   [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
 done
 sudo apt-get update
+sudo timedatectl set-timezone Asia/Bangkok
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \

@@ -1,6 +1,10 @@
 { pkgs, ... }:
 
 {
+  # Bangkok (ICT, UTC+7). Debian defaults to US/Eastern on this install; session TZ fixes
+  # panel clock, shells, and GUI apps without waiting on timedatectl.
+  home.sessionVariables.TZ = "Asia/Bangkok";
+
   # Debian's Xsession sources ~/.xsessionrc, so the XFCE session (and i3, the panel,
   # the app menu) see Nix-installed binaries, apps and session variables.
   home.file.".xsessionrc".text = ''
