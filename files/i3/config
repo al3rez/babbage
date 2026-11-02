@@ -2,7 +2,7 @@
 set $mod Mod4
 font pango:Inter 10
 
-# --- look: flat 1px white border on the focused window, no title bars, gaps
+# --- look: flat 1px white border on every window (focus is shown by picom dimming the rest), no title bars, gaps
 default_border pixel 1
 default_floating_border pixel 1
 hide_edge_borders none
@@ -10,8 +10,8 @@ gaps inner 12
 gaps outer 0
 #                        border   bg       text     indicator child_border
 client.focused           #ffffff  #ffffff  #000000  #ffffff   #ffffff
-client.focused_inactive  #555555  #555555  #ffffff  #555555   #555555
-client.unfocused         #333333  #333333  #888888  #333333   #333333
+client.focused_inactive  #ffffff  #ffffff  #000000  #ffffff   #ffffff
+client.unfocused         #ffffff  #ffffff  #000000  #ffffff   #ffffff
 client.urgent            #ff5555  #ff5555  #ffffff  #ff5555   #ff5555
 
 # --- XFCE pieces float / stay out of tiling

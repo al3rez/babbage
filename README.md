@@ -34,7 +34,7 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 
 | Area | Where |
 |---|---|
-| i3 instead of xfwm4 in the XFCE session, 12px gaps, flat 1px white borders | `modules/session.nix`, `modules/i3.nix`, `files/i3/config` |
+| i3 instead of xfwm4 in the XFCE session, 12px gaps, flat 1px white borders on every window (unfocused ones are dimmed, not recoloured) | `modules/session.nix`, `modules/i3.nix`, `files/i3/config` |
 | Top bar: i3 workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Firefox left, tray / volume / search / control centre / clock right, ends aligned to i3 gaps. NVIDIA profile: one bar per monitor, each listing only its own workspaces (tray on the LG only) | `modules/panel.nix`, `files/gtk-3.0/gtk.css` |
 | Workspaces belong to a monitor: 1–3 the LG, 4–6 the ASUS (`Super+N` jumps to that monitor; `Super+Ctrl+←/→` sends a window across). Each bar always shows its own three numbers, read from i3's config by `i3-ws-bar` (focused bright, other monitor's dimmer, rest dim, empty faint, urgent red; click to switch) | `files/i3/config`, `modules/i3.nix`, `files/bin/i3-ws-bar` |
 | Grok Bot (Cursor's apt repo), ChatGPT with Codex (OpenAI's official .deb, which adds its signed apt repo for updates) and T3 Code nightly (GitHub, digest-checked), installed in the background; pinned on the bar with matching macOS squircle icons (`files/bin/make-app-icon` fits any app's artwork into Grok Bot's squircle) | `files/bin/install-desktop-apps`, `files/icons/hicolor/`, `modules/panel.nix` |
