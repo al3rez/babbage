@@ -32,7 +32,7 @@ exec_always --no-startup-id @i3wsbar@
 
 # --- launch
 bindsym $mod+Return exec @ghostty@
-bindsym $mod+space exec xfce4-popup-whiskermenu
+bindsym $mod+space exec --no-startup-id @launcher@
 bindsym $mod+d exec xfce4-appfinder
 bindsym $mod+Shift+f exec thunar
 bindsym $mod+q kill

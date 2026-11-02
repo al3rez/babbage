@@ -1,0 +1,143 @@
+#!@python@
+"""Raycast-style app launcher on rofi (dmenu mode).
+
+Lists the desktop's applications in sections: Favorites (the apps pinned on the bar),
+Suggestions (the ones launched most from here) and Applications (everything else, A-Z).
+Typing searches all of them (fuzzy, best match first). Enter opens the app, Tab
+("Ask AI") sends the typed text to ChatGPT, Esc closes.
+
+The look lives in the rofi theme (files/rofi/launcher.rasi): section headers are
+unselectable rows marked "urgent" so the theme can style them, and the right-hand
+"Application" label is a fixed textbox in every row that the theme hides on headers.
+"""
+import configparser
+import html
+import json
+import os
+import subprocess
+import sys
+import urllib.parse
+
+ROFI = "@rofi@"
+THEME = "@theme@"
+GTK_LAUNCH = "@gtklaunch@"
+
+FAVORITES = ["com.mitchellh.ghostty", "grok-bot", "chatgpt", "t3code", "firefox-esr"]
+SUGGESTIONS = 4
+HISTORY = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                       "launcher", "history.json")
+DESKTOP = set(filter(None, os.environ.get("XDG_CURRENT_DESKTOP", "XFCE").split(":")))
+
+
+def data_dirs():
+    yield os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    yield from (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+
+
+def applications():
+    """{desktop id: entry} for every app a menu would show; earlier data dirs win."""
+    seen, apps = set(), {}
+    for base in data_dirs():
+        root = os.path.join(base, "applications")
+        for dirpath, _, files in os.walk(root):
+            for f in sorted(files):
+                if not f.endswith(".desktop"):
+                    continue
+                path = os.path.join(dirpath, f)
+                app_id = os.path.relpath(path, root)[:-len(".desktop")].replace("/", "-")
+                if app_id in seen:
+                    continue
+                seen.add(app_id)
+                entry = read_entry(path)
+                if entry:
+                    apps[app_id] = entry
+    return apps
+
+
+def read_entry(path):
+    cp = configparser.RawConfigParser(strict=False)
+    cp.optionxform = str
+    try:
+        cp.read(path, encoding="utf-8")
+        e = cp["Desktop Entry"]
+    except (configparser.Error, KeyError, UnicodeDecodeError):
+        return None
+    listed = lambda k: set(filter(None, e.get(k, "").split(";")))
+    if (e.get("Type") != "Application" or e.get("NoDisplay") == "true" or e.get("Hidden") == "true"
+            or not e.get("Name") or (listed("OnlyShowIn") and not listed("OnlyShowIn") & DESKTOP)
+            or listed("NotShowIn") & DESKTOP):
+        return None
+    exe = os.path.basename(e.get("Exec", "").split(" ")[0])
+    return {"name": e["Name"], "icon": e.get("Icon", "application-x-executable"),
+            "meta": " ".join([e.get("GenericName", ""), e.get("Keywords", "").replace(";", " "), exe])}
+
+
+def load_history():
+    try:
+        with open(HISTORY) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_history(history):
+    os.makedirs(os.path.dirname(HISTORY), exist_ok=True)
+    tmp = HISTORY + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(history, f)
+    os.replace(tmp, HISTORY)
+
+
+def clean(s):
+    return s.replace("\0", "").replace("\n", " ").replace("\x1f", " ")
+
+
+def main():
+    apps = applications()
+    history = load_history()
+    favorites = [a for a in FAVORITES if a in apps]
+    rest = [a for a in apps if a not in favorites]
+    suggested = sorted((a for a in rest if history.get(a)), key=lambda a: -history[a])[:SUGGESTIONS]
+    others = sorted((a for a in rest if a not in suggested), key=lambda a: apps[a]["name"].lower())
+
+    rows, ids, headers = [], [], []
+    for title, section in (("Favorites", favorites), ("Suggestions", suggested), ("Applications", others)):
+        if not section:
+            continue
+        headers.append(str(len(rows)))
+        rows.append(f"{title}\0nonselectable\x1ftrue\x1fdisplay\x1f<span foreground=\"#ffffff8c\">{title}</span>")
+        ids.append(None)
+        for a in section:
+            e = apps[a]
+            rows.append(f"{clean(e['name'])}\0icon\x1f{clean(e['icon'])}\x1fmeta\x1f{clean(e['meta'])}"
+                        f"\x1fdisplay\x1f{html.escape(clean(e['name']), quote=False)}")
+            ids.append(a)
+
+    proc = subprocess.run(
+        [ROFI, "-dmenu", "-theme", THEME, "-p", "", "-i", "-markup-rows", "-show-icons",
+         "-no-custom", "-format", "i f", "-matching", "fuzzy", "-sort", "-sorting-method", "fzf",
+         "-u", ",".join(headers), "-selected-row", "1",
+         "-kb-element-next", "", "-kb-custom-1", "Tab"],
+        input="\n".join(rows), capture_output=True, text=True,
+        # Nix's rofi can't load Debian's locales (it quits silently); C.UTF-8 is built in
+        env={**os.environ, "LC_ALL": "C.UTF-8"})
+    index, _, query = proc.stdout.rstrip("\n").partition(" ")
+
+    if proc.returncode == 10:   # Tab: Ask AI
+        if query.strip():
+            subprocess.Popen(["xdg-open", "https://chatgpt.com/?q=" + urllib.parse.quote(query.strip())],
+                             start_new_session=True)
+        elif "chatgpt" in apps:
+            subprocess.Popen([GTK_LAUNCH, "chatgpt"], start_new_session=True)
+        return
+    if proc.returncode != 0 or not index.isdigit() or not ids[int(index)]:
+        return
+    app = ids[int(index)]
+    subprocess.Popen([GTK_LAUNCH, app], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    history[app] = history.get(app, 0) + 1
+    save_history(history)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

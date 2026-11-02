@@ -7,12 +7,18 @@ let
       [ "@python@" "@i3@" "@i3msg@" "@gdbus@" ]
       [ "${pkgs.python3}/bin/python3" "${pkgs.i3}/bin/i3" "${pkgs.i3}/bin/i3-msg" "${pkgs.glib.bin}/bin/gdbus" ]
       (builtins.readFile ../files/bin/i3-ws-bar));
+  # Raycast-style launcher (Super+Space): rofi in dmenu mode with files/rofi/launcher.rasi
+  launcher = pkgs.writeScript "launcher"
+    (builtins.replaceStrings
+      [ "@python@" "@rofi@" "@theme@" "@gtklaunch@" ]
+      [ "${pkgs.python3}/bin/python3" "${pkgs.rofi}/bin/rofi" "${../files/rofi/launcher.rasi}" "${pkgs.gtk3}/bin/gtk-launch" ]
+      (builtins.readFile ../files/bin/launcher));
 in
 {
   # i3 config with absolute Nix paths, so it never depends on the session's $PATH
   xdg.configFile."i3/config".text =
     builtins.replaceStrings
-      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" ]
+      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" "@launcher@" ]
       [
         "${desk.ghostty}/bin/ghostty"
         "${pkgs.feh}/bin/feh"
@@ -22,6 +28,7 @@ in
         "${desk.picom}/bin/picom"
         "${config.xdg.configHome}/picom/picom.conf"
         "${wsBar}"
+        "${launcher}"
       ]
       (builtins.readFile ../files/i3/config);
 
