@@ -1,0 +1,133 @@
+#!@python@
+"""Tailscale in the menu bar, drawn like the other tray icons.
+
+`tailscale systray` paints its own full-colour bitmap, which can't be themed, so the bar uses
+a genmon slot instead:
+
+  tailscale-tray status   genmon output: white dot mark (faint when disconnected), tooltip
+                          with the state and this machine's address, click opens the menu
+  tailscale-tray menu     rofi menu in the launcher's style: Connect / Disconnect, copy this
+                          machine's IP, exit node, online devices (click copies their IP),
+                          admin console
+"""
+import json
+import os
+import subprocess
+import sys
+
+TAILSCALE = "@tailscale@"
+ROFI = "@rofi@"
+THEME = "@theme@"
+XCLIP = "@xclip@"
+ICONS = "@icons@"
+SELF = os.path.realpath(sys.argv[0])
+PLUGIN = "genmon-69"
+ADMIN = "https://login.tailscale.com/admin/machines"
+
+
+def status():
+    try:
+        out = subprocess.run([TAILSCALE, "status", "--json"], capture_output=True, text=True, timeout=4).stdout
+        return json.loads(out)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def esc(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def ipv4(node):
+    return next((ip for ip in node.get("TailscaleIPs") or [] if "." in ip), "")
+
+
+def genmon():
+    s = status()
+    running = bool(s) and s.get("BackendState") == "Running"
+    if running:
+        me = s.get("Self") or {}
+        tip = f"Tailscale: Connected\n{me.get('HostName', '')}  {ipv4(me)}"
+        exit_node = next((p["HostName"] for p in (s.get("Peer") or {}).values() if p.get("ExitNode")), None)
+        if exit_node:
+            tip += f"\nExit node: {exit_node}"
+    else:
+        tip = "Tailscale: " + ("Not running" if not s else {"Stopped": "Disconnected",
+                                                            "NeedsLogin": "Logged out"}.get(s.get("BackendState"), s.get("BackendState", "")))
+    icon = os.path.join(ICONS, "connected.svg" if running else "disconnected.svg")
+    print(f"<img>{icon}</img><click>{SELF} menu</click><tool>{esc(tip)}</tool>")
+
+
+def menu():
+    s = status() or {}
+    running = s.get("BackendState") == "Running"
+    me = s.get("Self") or {}
+    peers = sorted((s.get("Peer") or {}).values(), key=lambda p: p.get("HostName", "").lower())
+
+    rows, actions, headers = [], [], []
+
+    def header(text):
+        headers.append(str(len(rows)))
+        rows.append(f"{text}\0nonselectable\x1ftrue\x1fdisplay\x1f<span foreground=\"#ffffff8c\">{esc(text)}</span>")
+        actions.append(None)
+
+    def item(text, action, detail=""):
+        shown = esc(text) + (f"  <span foreground=\"#ffffff80\">{esc(detail)}</span>" if detail else "")
+        rows.append(f"{text} {detail}\0display\x1f{shown}")
+        actions.append(action)
+
+    if running:
+        header(f"Connected as {me.get('HostName', '')}")
+        item("Disconnect", ["down"])
+        item("Copy IP Address", ["copy", ipv4(me)], ipv4(me))
+    else:
+        header({"NeedsLogin": "Logged out"}.get(s.get("BackendState"), "Disconnected"))
+        item("Connect", ["up"])
+
+    exits = [p for p in peers if p.get("ExitNodeOption")]
+    if running and exits:
+        header("Exit Node")
+        current = next((p for p in exits if p.get("ExitNode")), None)
+        item("None", ["exit", ""], "✓" if not current else "")
+        for p in exits:
+            item(p.get("HostName", ""), ["exit", ipv4(p)], "✓" if p is current else ("" if p.get("Online") else "offline"))
+
+    online = [p for p in peers if p.get("Online")]
+    if running and online:
+        header("Network Devices")
+        for p in online:
+            item(p.get("HostName", ""), ["copy", ipv4(p)], ipv4(p))
+
+    header("Tailscale")
+    item("Admin Console", ["open", ADMIN])
+
+    first = next(i for i, a in enumerate(actions) if a)
+    proc = subprocess.run(
+        [ROFI, "-dmenu", "-theme", THEME, "-p", "", "-i", "-markup-rows", "-no-custom", "-format", "i",
+         "-u", ",".join(headers), "-selected-row", str(first),
+         "-theme-str", "window { location: northeast; anchor: northeast; x-offset: -12px; y-offset: 44px; width: 600px; }",
+         "-theme-str", f"listview {{ lines: {min(len(rows), 12)}; padding: 0 12px 8px 12px; }}",
+         "-theme-str", "mainbox { children: [ inputbar, listview ]; } inputbar { children: [ entry ]; }",
+         "-theme-str", 'entry { placeholder: "Tailscale"; } element { children: [ element-text ]; }'],
+        input="\n".join(rows), capture_output=True, text=True,
+        env={**os.environ, "LC_ALL": "C.UTF-8"})   # Nix's rofi can't load Debian's locales
+    index = proc.stdout.strip()
+    if proc.returncode != 0 or not index.isdigit() or not actions[int(index)]:
+        return
+    act, *arg = actions[int(index)]
+    if act == "up":
+        subprocess.run([TAILSCALE, "up"], timeout=30)
+    elif act == "down":
+        subprocess.run([TAILSCALE, "down"], timeout=30)
+    elif act == "exit":
+        subprocess.run([TAILSCALE, "set", f"--exit-node={arg[0]}"], timeout=30)
+    elif act == "copy":
+        subprocess.run([XCLIP, "-selection", "clipboard"], input=arg[0], text=True)
+    elif act == "open":
+        subprocess.Popen(["xdg-open", arg[0]], start_new_session=True)
+    # show the new state right away instead of at the next poll
+    subprocess.run(["xfce4-panel", f"--plugin-event={PLUGIN}:refresh:bool:true"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+if __name__ == "__main__":
+    {"status": genmon, "menu": menu}.get(sys.argv[1] if len(sys.argv) > 1 else "status", genmon)()

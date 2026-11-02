@@ -20,8 +20,28 @@ let
 
     '';
   }) 9;
+  # Tailscale beside the tray, drawn like the tray's icons (files/bin/tailscale-tray).
+  # The CLI is Debian's, matching its tailscaled.
+  tailscaleTray = pkgs.writeScript "tailscale-tray"
+    (builtins.replaceStrings
+      [ "@python@" "@tailscale@" "@rofi@" "@theme@" "@xclip@" "@icons@" ]
+      [ "${pkgs.python3}/bin/python3" "/usr/bin/tailscale" "${pkgs.rofi}/bin/rofi"
+        "${../files/rofi/launcher.rasi}" "${pkgs.xclip}/bin/xclip" "${../files/icons/tailscale}" ]
+      (builtins.readFile ../files/bin/tailscale-tray));
+  tailscaleRc = {
+    name = "genmon-69.rc";
+    path = pkgs.writeText "genmon-69.rc" ''
+      Command=${tailscaleTray} status
+      UseLabel=0
+      Text=
+      UpdatePeriod=5000
+      Font=Inter 10
+
+    '';
+  };
+
   genmonSlots = pkgs.linkFarm "genmon-slots"
-    (wsRcFiles 35 primaryOutput ++ lib.optionals dual (wsRcFiles 46 "DP-4"));
+    ([ tailscaleRc ] ++ wsRcFiles 35 primaryOutput ++ lib.optionals dual (wsRcFiles 46 "DP-4"));
 
   separator = id: expand: {
     "plugins/plugin-${toString id}" = "separator";
@@ -70,9 +90,10 @@ in
   xfconf.settings.xfce4-panel = {
     "panels" = if dual then [ 1 2 ] else [ 1 ];
     "panels/dark-mode" = true;
-    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 29 3 6 21 25 26 8 33 ];
+    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 29 3 69 6 21 25 26 8 33 ];
 
     # status area (tray and volume keys exist only once, on the primary bar)
+    "plugins/plugin-69" = "genmon";   # Tailscale, left of the tray
     "plugins/plugin-6" = "systray";
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
