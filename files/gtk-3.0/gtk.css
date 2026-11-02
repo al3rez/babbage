@@ -10,7 +10,7 @@
 #launcher-27 button, #launcher-56 button { padding-left: 8px; }
 
 /* menus (tray right-click, panel, app context menus): the same light popover look as the
-   Tailscale panel (files/bin/tailscale-tray), as macOS menu-bar popovers look over a bright
+   popovers (files/bin/menubar-popovers), as macOS menu-bar popovers look over a bright
    wallpaper: 12pt card, roomy rounded rows, soft grey hover. Menu windows are opaque (24-bit), so the colour is solid here and picom
    makes the whole window translucent, rounds it and blurs what's behind (files/picom/picom.conf).
    Colours are set explicitly and prefixed with window.popup: the bar's white-label rule above
@@ -37,3 +37,17 @@ window.popup, .popup { background-color: transparent; }
   color: transparent; -gtk-icon-source: none; -gtk-icon-transform: scale(0); opacity: 0; }
 /* it still keeps a few pixels; take them back from the volume button next to it */
 #pulseaudio-21 button { padding-left: 0; }
+
+/* switches and sliders (volume pop-up, settings): macOS style, matching the Tailscale popover */
+switch { min-width: 54px; min-height: 30px; border-radius: 16px; border: none; padding: 0;
+  background-color: rgba(0, 0, 0, 0.12); background-image: none; box-shadow: none; }
+switch:checked { background-color: #0a84ff; }
+switch slider { min-width: 27px; min-height: 27px; border-radius: 15px; margin: 1px;
+  background-color: #ffffff; background-image: none; border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+switch image { color: transparent; }
+scale trough { min-height: 6px; border-radius: 3px; border: none; background-color: rgba(0, 0, 0, 0.12);
+  background-image: none; box-shadow: none; }
+scale highlight { border-radius: 3px; border: none; background-color: #0a84ff; background-image: none; }
+scale slider { min-width: 22px; min-height: 22px; margin: -8px; border-radius: 12px; border: none;
+  background-color: #ffffff; background-image: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.30); }
+scale marks, scale mark, scale indicator { color: transparent; background: none; min-height: 0; min-width: 0; }

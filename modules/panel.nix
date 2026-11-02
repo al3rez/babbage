@@ -20,18 +20,18 @@ let
 
     '';
   }) 9;
-  # Tailscale in the tray (files/bin/tailscale-tray): a StatusNotifierItem with a white themed
-  # icon; clicking it opens a macOS-style popover. Nix GTK + typelibs; the tailscale CLI is
-  # Debian's, matching its tailscaled.
-  tailscaleTray = pkgs.writeShellScript "tailscale-tray" ''
+  # Tray popovers (files/bin/menubar-popovers): Tailscale's own tray item, and stand-ins for
+  # the apps in hiddenTray so their menus open as the same macOS-style popover. Nix GTK +
+  # typelibs; the tailscale CLI is Debian's, matching its tailscaled.
+  menubarPopovers = pkgs.writeShellScript "menubar-popovers" ''
     export GI_TYPELIB_PATH=${lib.makeSearchPathOutput "out" "lib/girepository-1.0"
       (with pkgs; [ gtk3 gdk-pixbuf pango atk harfbuzz glib gobject-introspection ])}
     unset GTK_MODULES GTK_PATH   # Debian's GTK modules don't load into Nix's GTK
     export GDK_PIXBUF_MODULE_FILE=${pkgs.librsvg.out}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache   # SVG icons
     export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
     export TAILSCALE=/usr/bin/tailscale XCLIP=${pkgs.xclip}/bin/xclip
-    export TAILSCALE_TRAY_ICONS=${../files/icons/tailscale}
-    exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/tailscale-tray} "$@"
+    export MENUBAR_ICONS=${../files/icons/tailscale}
+    exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/menubar-popovers} "$@"
   '';
 
   genmonSlots = pkgs.linkFarm "genmon-slots"
@@ -91,8 +91,9 @@ in
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
     # Electron apps (ChatGPT) put a fixed full-colour bitmap in the tray that can't be themed
-    # like the white glyphs; they're pinned on the bar anyway
-    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" ];
+    # like the white glyphs; they're pinned on the bar anyway. Wi-Fi, Telegram and Bluetooth
+    # are shown by files/bin/menubar-popovers' stand-ins instead (their popovers).
+    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "nm-applet" "TelegramDesktop" "blueman" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 
@@ -129,11 +130,20 @@ in
   // clock 63);
 
   xdg.configFile = {
-    "autostart/tailscale-tray.desktop".text = ''
+    "autostart/menubar-popovers.desktop".text = ''
       [Desktop Entry]
       Type=Application
-      Name=Tailscale tray
-      Exec=${tailscaleTray}
+      Name=Menu bar popovers
+      Exec=${menubarPopovers}
+      X-GNOME-Autostart-enabled=true
+    '';
+    # nm-applet as a StatusNotifierItem (its menu over dbusmenu), so it gets a popover too
+    "autostart/nm-applet.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=Network
+      Exec=nm-applet --indicator
+      NoDisplay=true
       X-GNOME-Autostart-enabled=true
     '';
     "xfce4/panel/launcher-27/ghostty.desktop".text = ghosttyDesktop;

@@ -1,0 +1,582 @@
+"""macOS-style popovers for the menu bar's tray icons.
+
+xfce4-panel's tray (plugins/systray, 4.20) turns a tray icon's dbusmenu into a stock GTK menu
+(sn-item.c: dbusmenu_gtkmenu_new) and pops that up on click; only an icon with no menu gets
+Activate(x, y) instead (sn-button.c). So this daemon puts its own icons in the tray, with no
+menu, and opens one popover style for all of them:
+
+  * Tailscale: its own icon (files/icons/tailscale, faint when disconnected) and content:
+    on/off switch, this device, every device with its IP (click copies), offline devices,
+    exit node, admin console. (`tailscale systray` draws a fixed bitmap that can't match.)
+  * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi): a stand-in icon mirroring
+    the app's own icon; the original is hidden in the tray (modules/panel.nix hidden-items).
+    The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
+    submenus expand in place, disabled items greyed; choosing an item sends the click back.
+
+The popover is a solid window; picom rounds it, makes it slightly translucent and frosts it
+(files/picom/picom.conf, class Menubar-popover). Escape or a click outside closes it.
+Runs under modules/panel.nix's wrapper (Nix GTK + typelibs), started from XDG autostart.
+"""
+import json
+import os
+import socket
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+
+TAILSCALE = os.environ.get("TAILSCALE", "tailscale")
+ICONS = os.environ["MENUBAR_ICONS"]
+XCLIP = os.environ.get("XCLIP", "xclip")
+ADMIN = "https://login.tailscale.com/admin/machines"
+POLL = 5          # seconds between Tailscale status checks
+BAR = 36          # menu bar height (px)
+WIDTH_PT = 340    # popover width in points (macOS popovers are ~300-340pt)
+
+# tray Id -> stand-in title (tooltip fallback)
+PROXIED = {"nm-applet": "Wi-Fi", "TelegramDesktop": "Telegram", "blueman": "Bluetooth"}
+
+WATCHER = ("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
+SNI = "org.kde.StatusNotifierItem"
+DBUSMENU = "com.canonical.dbusmenu"
+SNI_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierItem">
+    <property name="Category" type="s" access="read"/>
+    <property name="Id" type="s" access="read"/>
+    <property name="Title" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="IconName" type="s" access="read"/>
+    <property name="IconThemePath" type="s" access="read"/>
+    <property name="IconPixmap" type="a(iiay)" access="read"/>
+    <property name="ItemIsMenu" type="b" access="read"/>
+    <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
+    <method name="Activate"><arg name="x" type="i" direction="in"/><arg name="y" type="i" direction="in"/></method>
+    <method name="SecondaryActivate"><arg name="x" type="i" direction="in"/><arg name="y" type="i" direction="in"/></method>
+    <method name="ContextMenu"><arg name="x" type="i" direction="in"/><arg name="y" type="i" direction="in"/></method>
+    <method name="Scroll"><arg name="delta" type="i" direction="in"/><arg name="orientation" type="s" direction="in"/></method>
+    <signal name="NewIcon"/>
+    <signal name="NewToolTip"/>
+    <signal name="NewStatus"><arg name="status" type="s"/></signal>
+  </interface>
+</node>"""
+
+
+# ---- helpers ---------------------------------------------------------------------------------
+def ts_status():
+    try:
+        out = subprocess.run([TAILSCALE, "status", "--json"], capture_output=True, text=True, timeout=3).stdout
+        return json.loads(out)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def ipv4(node):
+    return next((ip for ip in node.get("TailscaleIPs") or [] if "." in ip), "")
+
+
+def copy(text):
+    p = subprocess.Popen([XCLIP, "-selection", "clipboard"], stdin=subprocess.PIPE,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p.communicate(text.encode())
+
+
+def run(*cmd, then=None):
+    """Run a command without blocking the UI; `then` runs when it exits."""
+    proc = Gio.Subprocess.new(list(cmd), Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE)
+    if then:
+        proc.wait_async(None, lambda *_: then())
+
+
+def device_icon(os_name):
+    return "device-phone.svg" if os_name in ("iOS", "android") else "device-laptop.svg"
+
+
+def file_image(name, size):
+    """One of files/icons/tailscale at `size` px, drawn at that size (crisp at 1.5x)."""
+    pb = GdkPixbuf.Pixbuf.new_from_file_at_size(os.path.join(ICONS, name), size, size)
+    return Gtk.Image.new_from_pixbuf(pb)
+
+
+def css(scale):
+    px = lambda v: f"{round(v * scale)}px"
+    return f"""
+    window.menubar-popover {{ background-color: #f6f6f8; }}
+    .card {{ background-color: #f6f6f8; border-radius: {px(12)};
+             border: 1px solid rgba(0, 0, 0, 0.10); padding: {px(8)}; }}
+    .card, .card label {{ color: rgba(0, 0, 0, 0.85); font-family: "Inter"; }}
+    .title {{ font-weight: 600; }}
+    .dim, .card label.dim {{ color: rgba(0, 0, 0, 0.45); }}
+    .section {{ color: rgba(0, 0, 0, 0.50); font-weight: 600; margin: {px(10)} {px(8)} {px(4)} {px(8)}; }}
+    .row {{ padding: {px(7)} {px(8)}; border-radius: {px(7)}; }}
+    .row:hover {{ background-color: rgba(0, 0, 0, 0.055); }}
+    .muted label {{ color: rgba(0, 0, 0, 0.40); }}
+    .nested {{ margin-left: {px(14)}; }}
+    .rule {{ background-color: rgba(0, 0, 0, 0.08); min-height: 1px; margin: {px(6)} {px(8)}; }}
+    .header {{ padding: {px(6)} {px(8)} {px(2)} {px(8)}; }}
+    .card label.check {{ color: #0a84ff; font-weight: 600; }}
+    switch {{ min-width: {px(36)}; min-height: {px(20)}; border-radius: {px(11)}; border: none;
+              background-color: rgba(0, 0, 0, 0.12); background-image: none; box-shadow: none; }}
+    switch:checked {{ background-color: #0a84ff; }}
+    switch slider {{ min-width: {px(18)}; min-height: {px(18)}; border-radius: {px(10)}; margin: {px(1)};
+                     background-color: #ffffff; background-image: none; border: none;
+                     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }}
+    switch image {{ color: transparent; }}
+    """
+
+
+# ---- the popover ----------------------------------------------------------------------------
+class Popover(Gtk.Window):
+    """One window for every tray icon; `owner.fill(popover, card)` provides the content."""
+
+    def __init__(self, app):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.set_type_hint(Gdk.WindowTypeHint.UTILITY)        # not "normal": picom would dim it
+        self.set_wmclass("menubar-popover", "Menubar-popover")  # picom's rule matches this
+        self.get_style_context().add_class("menubar-popover")
+        self.app = app
+        self.owner = None
+        self.card = None
+        self.connect("button-press-event", self.on_button)
+        self.connect("key-press-event", lambda _w, e: e.keyval == Gdk.KEY_Escape and self.close())
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.KEY_PRESS_MASK)
+
+    def on_button(self, _w, e):
+        alloc = self.get_allocation()
+        if not (0 <= e.x <= alloc.width and 0 <= e.y <= alloc.height):
+            self.close()
+        return False
+
+    def toggle(self, owner):
+        if self.get_visible() and self.owner is owner:
+            self.close()
+            return
+        if self.get_visible():
+            self.close()
+        self.owner = owner
+        _s, px, py = Gdk.Display.get_default().get_default_seat().get_pointer().get_position()
+        mon = Gdk.Display.get_default().get_monitor_at_point(px, py).get_geometry()
+        self.rebuild()
+        self.show_all()
+        w, _h = self.get_size()
+        self.move(min(max(px - w // 2, mon.x + 12), mon.x + mon.width - w - 12), mon.y + BAR + 6)
+        self.present()
+        GLib.idle_add(self.grab)
+
+    def grab(self):
+        if self.get_visible():
+            Gdk.Display.get_default().get_default_seat().grab(
+                self.get_window(), Gdk.SeatCapabilities.ALL, True, None, None, None)
+        return False
+
+    def close(self):
+        Gdk.Display.get_default().get_default_seat().ungrab()
+        self.hide()
+        return True
+
+    def rebuild(self):
+        if self.card:
+            self.remove(self.card)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.get_style_context().add_class("card")
+        card.set_size_request(round(WIDTH_PT * self.app.scale), -1)
+        self.card = card
+        self.add(card)
+        self.owner.fill(self, card)
+        card.show_all()
+        self.resize(1, 1)   # shrink-wrap to the content
+
+    # building blocks shared by every popover
+    def label(self, text, *classes, xalign=0.0, expand=False):
+        lab = Gtk.Label(label=text, xalign=xalign)
+        lab.set_hexpand(expand)
+        if expand:
+            lab.set_ellipsize(3)   # PANGO_ELLIPSIZE_END
+        for c in classes:
+            lab.get_style_context().add_class(c)
+        return lab
+
+    def header(self, card, image, title, widget=None):
+        head = Gtk.Box(spacing=round(10 * self.app.scale))
+        head.get_style_context().add_class("header")
+        if image:
+            head.pack_start(image, False, False, 0)
+        head.pack_start(self.label(title, "title", expand=True), True, True, 0)
+        if widget:
+            head.pack_end(widget, False, False, 0)
+        card.pack_start(head, False, False, 0)
+
+    def section(self, card, title):
+        card.pack_start(self.label(title, "section"), False, False, 0)
+
+    def rule(self, card):
+        sep = Gtk.Box()
+        sep.get_style_context().add_class("rule")
+        card.pack_start(sep, False, False, 0)
+
+    def row(self, box, icon, name, detail, on_click, *classes, detail_class="dim"):
+        ev = Gtk.EventBox()
+        ev.set_visible_window(False)
+        inner = Gtk.Box(spacing=round(10 * self.app.scale))
+        for c in ("row",) + classes:
+            inner.get_style_context().add_class(c)
+        if icon:
+            inner.pack_start(icon, False, False, 0)
+        inner.pack_start(self.label(name, expand=True), True, True, 0)
+        detail_label = self.label(detail, detail_class, xalign=1.0)
+        inner.pack_end(detail_label, False, False, 0)
+        ev.add(inner)
+        if on_click:
+            ev.connect("button-release-event", lambda *_: on_click(detail_label) or True)
+            ev.connect("enter-notify-event", lambda *_: inner.set_state_flags(Gtk.StateFlags.PRELIGHT, False))
+            ev.connect("leave-notify-event", lambda *_: inner.unset_state_flags(Gtk.StateFlags.PRELIGHT))
+        box.pack_start(ev, False, False, 0)
+        return detail_label
+
+
+# ---- tray items -----------------------------------------------------------------------------
+class TrayItem:
+    """A StatusNotifierItem exported at `path` on the app's bus connection."""
+
+    def __init__(self, app, path):
+        self.app, self.path = app, path
+        self.reg = app.bus.register_object(path, app.sni_info, self.on_call, self.on_get, None)
+
+    def register(self):
+        self.app.bus.call(*WATCHER, "RegisterStatusNotifierItem", GLib.Variant("(s)", (self.path,)),
+                          None, Gio.DBusCallFlags.NONE, -1, None, None)
+
+    def emit(self, signal, params=None):
+        self.app.bus.emit_signal(None, self.path, SNI, signal, params)
+
+    def on_call(self, _c, _s, _p, _i, method, _params, invocation):
+        if method in ("Activate", "SecondaryActivate", "ContextMenu"):
+            self.app.popover.toggle(self)
+        invocation.return_value(None)
+
+    def on_get(self, _c, _s, _p, _i, prop):
+        return self.props().get(prop)
+
+
+class TailscaleItem(TrayItem):
+    def __init__(self, app):
+        self.state = ts_status()
+        self.show_offline = False
+        super().__init__(app, "/menubar/tailscale")
+        self.icon = self.icon_name()
+        GLib.timeout_add_seconds(POLL, self.poll)
+
+    def icon_name(self):
+        return "tailscale-connected" if (self.state or {}).get("BackendState") == "Running" else "tailscale-disconnected"
+
+    def tooltip(self):
+        s = self.state or {}
+        if s.get("BackendState") == "Running":
+            me = s.get("Self") or {}
+            return f"Tailscale: Connected — {me.get('HostName', '')} {ipv4(me)}"
+        return "Tailscale: " + {"Stopped": "Disconnected", "NeedsLogin": "Logged out"}.get(
+            s.get("BackendState"), "Not running")
+
+    def props(self):
+        return {
+            "Category": GLib.Variant("s", "ApplicationStatus"), "Id": GLib.Variant("s", "tailscale"),
+            "Title": GLib.Variant("s", "Tailscale"), "Status": GLib.Variant("s", "Active"),
+            "IconName": GLib.Variant("s", self.icon), "IconThemePath": GLib.Variant("s", ICONS),
+            "IconPixmap": GLib.Variant("a(iiay)", []), "ItemIsMenu": GLib.Variant("b", False),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", ("", [], "Tailscale", self.tooltip())),
+        }
+
+    def refresh_now(self):
+        self.poll()
+        return False
+
+    def poll(self):
+        self.state = ts_status()
+        icon = self.icon_name()
+        if icon != self.icon:
+            self.icon = icon
+            self.emit("NewIcon")
+        self.emit("NewToolTip")
+        pop = self.app.popover
+        if pop.get_visible() and pop.owner is self:
+            pop.rebuild()
+        return True
+
+    def copier(self, ip):
+        def click(detail_label):
+            copy(ip)
+            detail_label.set_text("Copied")
+            GLib.timeout_add(1200, lambda: detail_label.set_text(ip) and False)
+        return click
+
+    def fill(self, pop, card):
+        sc = self.app.scale
+        s = self.state
+        state = (s or {}).get("BackendState")
+        running = state == "Running"
+        me = (s or {}).get("Self") or {}
+        size = round(18 * sc)
+
+        sw = Gtk.Switch(active=running, valign=Gtk.Align.CENTER)
+        sw.set_sensitive(bool(s) and state in ("Running", "Stopped"))
+        sw.connect("notify::active", lambda w, _p: run(TAILSCALE, "up" if w.get_active() else "down",
+                                                       then=self.refresh_now))
+        pop.header(card, file_image("tailscale-logo.svg", size), "Tailscale", sw)
+        if running:
+            pop.row(card, None, me.get("HostName", ""), ipv4(me), self.copier(ipv4(me)))
+        else:
+            text = {"Stopped": "Disconnected", "NeedsLogin": "Logged out — run tailscale up",
+                    None: "tailscaled is not running"}.get(state, state)
+            pop.row(card, None, text, "", None, "muted")
+        if running:
+            peers = sorted((s.get("Peer") or {}).values(), key=lambda p: (p.get("HostName") or "").lower())
+            online = [p for p in peers if p.get("Online")]
+            offline = [p for p in peers if not p.get("Online")]
+            pop.rule(card)
+            pop.section(card, "Network Devices")
+            for p in online:
+                pop.row(card, file_image(device_icon(p.get("OS")), size), p.get("HostName", ""), ipv4(p),
+                        self.copier(ipv4(p)))
+            if offline:
+                pop.row(card, None, f"Offline ({len(offline)})", "▾" if self.show_offline else "▸",
+                        lambda _l: self.toggle_offline(), "muted")
+                if self.show_offline:
+                    for p in offline:
+                        pop.row(card, file_image(device_icon(p.get("OS")), size), p.get("HostName", ""),
+                                ipv4(p), self.copier(ipv4(p)), "muted")
+            exits = [p for p in peers if p.get("ExitNodeOption")]
+            if exits:
+                pop.rule(card)
+                pop.section(card, "Exit Node")
+                current = next((p for p in exits if p.get("ExitNode")), None)
+                pop.row(card, None, "None", "✓" if not current else "",
+                        lambda _l: run(TAILSCALE, "set", "--exit-node=", then=self.refresh_now),
+                        detail_class="check")
+                for p in exits:
+                    ip = ipv4(p)
+                    pop.row(card, file_image(device_icon(p.get("OS")), size), p.get("HostName", ""),
+                            "✓" if p is current else "",
+                            lambda _l, ip=ip: run(TAILSCALE, "set", f"--exit-node={ip}", then=self.refresh_now),
+                            *(() if p.get("Online") else ("muted",)), detail_class="check")
+        pop.rule(card)
+        pop.row(card, None, "Admin Console", "↗", lambda _l: (subprocess.Popen(
+            ["xdg-open", ADMIN], start_new_session=True), pop.close()))
+
+    def toggle_offline(self):
+        self.show_offline = not self.show_offline
+        self.app.popover.rebuild()
+
+
+class ProxyItem(TrayItem):
+    """Stands in for an app's tray icon: same icon, our popover with the app's menu."""
+
+    def __init__(self, app, service, original_id):
+        self.title = PROXIED[original_id]
+        self.orig = {}
+        self.open_subs = set()
+        self.service = self.sub = None
+        super().__init__(app, f"/menubar/{original_id.replace('-', '_')}")
+        self.retarget(service)
+
+    def retarget(self, service):
+        """Follow the app to its current connection (it re-registers e.g. when the panel restarts)."""
+        if self.sub is not None:
+            self.app.bus.signal_unsubscribe(self.sub)
+        self.service = service
+        self.bus_name, _, path = service.partition("/")
+        self.orig_path = "/" + path if path else "/StatusNotifierItem"
+        self.sub = self.app.bus.signal_subscribe(self.bus_name, SNI, None, self.orig_path, None,
+                                                 Gio.DBusSignalFlags.NONE, self.on_orig_signal)
+        self.reload()
+        self.emit("NewIcon")
+        self.emit("NewStatus", GLib.Variant("(s)", (self.orig.get("Status", "Active"),)))
+
+    def gone(self):
+        """The app quit: hide the stand-in (the tray hides Passive items) until it's back."""
+        self.orig = {}
+        self.emit("NewStatus", GLib.Variant("(s)", ("Passive",)))
+
+    def reload(self):
+        try:
+            res = self.app.bus.call_sync(self.bus_name, self.orig_path, "org.freedesktop.DBus.Properties",
+                                         "GetAll", GLib.Variant("(s)", (SNI,)), None,
+                                         Gio.DBusCallFlags.NONE, 2000, None)
+            self.orig = res.unpack()[0]
+        except GLib.Error:
+            pass
+
+    def on_orig_signal(self, _c, _s, _p, _i, signal, params):
+        self.reload()
+        self.emit(signal, params if signal == "NewStatus" else None)
+
+    def props(self):
+        o = self.orig
+        tip = o.get("ToolTip") or ("", [], "", "")
+        icon, theme_path = o.get("IconName", ""), o.get("IconThemePath", "")
+        if icon.startswith("nm-signal-"):
+            # Wi-Fi strength: our own glyph (files/icons/tailscale/menubar-wifi-N). The theme's
+            # is filled shapes on a 16px grid whose seams turn jagged at bar size.
+            pct = int("".join(ch for ch in icon[len("nm-signal-"):] if ch.isdigit()) or 0)
+            icon, theme_path = f"menubar-wifi-{0 if pct == 0 else 1 if pct <= 25 else 2 if pct <= 50 else 3}", ICONS
+        elif icon and not icon.endswith("-symbolic") and Gtk.IconTheme.get_default().has_icon(icon + "-symbolic"):
+            icon += "-symbolic"   # symbolic variants render like the other tray glyphs
+        return {
+            "Category": GLib.Variant("s", o.get("Category", "ApplicationStatus")),
+            "Id": GLib.Variant("s", f"menubar-{self.title.lower()}"),
+            "Title": GLib.Variant("s", self.title),
+            "Status": GLib.Variant("s", o.get("Status", "Passive") if o else "Passive"),
+            "IconName": GLib.Variant("s", icon),
+            "IconThemePath": GLib.Variant("s", theme_path),
+            "IconPixmap": GLib.Variant("a(iiay)", o.get("IconPixmap", [])),
+            "ItemIsMenu": GLib.Variant("b", False),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", (tip[0], tip[1], tip[2] or self.title, tip[3])),
+        }
+
+    # dbusmenu
+    def menu_path(self):
+        return self.orig.get("Menu", "/MenuBar")
+
+    def layout(self):
+        try:
+            self.app.bus.call_sync(self.bus_name, self.menu_path(), DBUSMENU, "AboutToShow",
+                                   GLib.Variant("(i)", (0,)), None, Gio.DBusCallFlags.NONE, 1000, None)
+        except GLib.Error:
+            pass
+        try:
+            res = self.app.bus.call_sync(self.bus_name, self.menu_path(), DBUSMENU, "GetLayout",
+                                         GLib.Variant("(iias)", (0, -1, [])), None,
+                                         Gio.DBusCallFlags.NONE, 2000, None)
+            return res.unpack()[1]
+        except GLib.Error:
+            return None
+
+    def click(self, item_id):
+        self.app.bus.call(self.bus_name, self.menu_path(), DBUSMENU, "Event",
+                          GLib.Variant("(isvu)", (item_id, "clicked", GLib.Variant("i", 0),
+                                                  Gtk.get_current_event_time())),
+                          None, Gio.DBusCallFlags.NONE, -1, None, None)
+
+    def fill(self, pop, card):
+        # no header: the app's own menu is the content (only Tailscale's popover has one)
+        layout = self.layout()
+        if not layout:
+            pop.row(card, None, "Menu unavailable", "", None, "muted")
+            return
+        self.fill_items(pop, card, layout[2], nested=False)
+
+    def fill_items(self, pop, card, children, nested):
+        last_was_rule = True
+        for child in children:
+            item_id, props, kids = child
+            if not props.get("visible", True):
+                continue
+            if props.get("type") == "separator":
+                if not last_was_rule:
+                    pop.rule(card)
+                    last_was_rule = True
+                continue
+            text = (props.get("label") or "").replace("__", "\0").replace("_", "").replace("\0", "_")
+            enabled = props.get("enabled", True)
+            classes = (() if enabled else ("muted",)) + (("nested",) if nested else ())
+            if props.get("children-display") == "submenu" and kids:
+                is_open = item_id in self.open_subs
+                pop.row(card, None, text, "▾" if is_open else "▸",
+                        (lambda _l, i=item_id: self.toggle_sub(i)) if enabled else None, *classes)
+                if is_open:
+                    self.fill_items(pop, card, kids, nested=True)
+            else:
+                checked = props.get("toggle-type") in ("checkmark", "radio") and props.get("toggle-state") == 1
+                pop.row(card, None, text, "✓" if checked else "",
+                        (lambda _l, i=item_id: (self.click(i), pop.close())) if enabled else None,
+                        *classes, detail_class="check")
+            last_was_rule = False
+
+    def toggle_sub(self, item_id):
+        self.open_subs ^= {item_id}
+        self.app.popover.rebuild()
+
+
+# ---- the daemon -----------------------------------------------------------------------------
+class App:
+    def __init__(self):
+        dpi = Gtk.Settings.get_default().get_property("gtk-xft-dpi")
+        self.scale = (dpi / 1024 / 96) if dpi and dpi > 0 else 1.0
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css(self.scale).encode())
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_USER + 1)
+        self.popover = Popover(self)
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        self.sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
+        self.tailscale = TailscaleItem(self)
+        self.proxies = {}   # tray Id -> ProxyItem
+        self.bus.signal_subscribe(WATCHER[0], WATCHER[2], None, WATCHER[1], None,
+                                  Gio.DBusSignalFlags.NONE, self.on_watcher_signal)
+        # (re)register whenever a tray appears, e.g. after the panel restarts
+        Gio.bus_watch_name_on_connection(self.bus, WATCHER[0], Gio.BusNameWatcherFlags.NONE,
+                                         self.on_tray, None)
+
+    def on_tray(self, *_):
+        self.tailscale.register()
+        for p in self.proxies.values():
+            p.register()
+        self.scan()
+
+    def scan(self):
+        try:
+            res = self.bus.call_sync(WATCHER[0], WATCHER[1], "org.freedesktop.DBus.Properties", "Get",
+                                     GLib.Variant("(ss)", (WATCHER[2], "RegisteredStatusNotifierItems")),
+                                     None, Gio.DBusCallFlags.NONE, 2000, None)
+            for service in res.unpack()[0]:
+                self.consider(service)
+        except GLib.Error:
+            pass
+
+    def consider(self, service):
+        if service.startswith(self.bus.get_unique_name() + "/"):
+            return
+        bus_name, _, path = service.partition("/")
+        try:
+            res = self.bus.call_sync(bus_name, "/" + path if path else "/StatusNotifierItem",
+                                     "org.freedesktop.DBus.Properties", "Get", GLib.Variant("(ss)", (SNI, "Id")),
+                                     None, Gio.DBusCallFlags.NONE, 2000, None)
+            item_id = res.unpack()[0]
+        except GLib.Error:
+            return
+        if item_id not in PROXIED:
+            return
+        if item_id in self.proxies:
+            if self.proxies[item_id].service != service:
+                self.proxies[item_id].retarget(service)
+        else:
+            self.proxies[item_id] = ProxyItem(self, service, item_id)
+            self.proxies[item_id].register()
+
+    def on_watcher_signal(self, _c, _s, _p, _i, signal, params):
+        service = params.unpack()[0]
+        if signal == "StatusNotifierItemRegistered":
+            GLib.timeout_add(500, lambda: self.consider(service) and False)
+        elif signal == "StatusNotifierItemUnregistered":
+            for proxy in self.proxies.values():
+                if proxy.service == service:
+                    proxy.gone()
+
+
+def main():
+    # one instance per session: a second start just exits
+    lock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        lock.bind(f"\0menubar-popovers-{os.getuid()}")
+    except OSError:
+        return 0
+    App()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
