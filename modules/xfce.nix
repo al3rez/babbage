@@ -8,7 +8,10 @@
       "Xft/Antialias" = 1;
       "Xft/HintStyle" = "hintslight";
       "Gdk/WindowScalingFactor" = 1;
-      "Gtk/CursorThemeSize" = 36;
+      # dark cursor everywhere. mate-black ships 24/32/48/64/96 px only; a size it lacks (e.g. 36)
+      # gets rounded down by GTK4/Firefox, scaled by Electron and rounded up by GTK3.
+      "Gtk/CursorThemeName" = "mate-black";
+      "Gtk/CursorThemeSize" = 32;
       "Gtk/FontName" = "Inter 10";
       "Net/IconThemeName" = "WhiteSur-Mac";
     };
