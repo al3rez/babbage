@@ -20,12 +20,22 @@ let
       [ "@python@" "@rofi@" "@theme@" "@gtklaunch@" ]
       [ "${pkgs.python3}/bin/python3" "${pkgs.rofi}/bin/rofi" "${../files/rofi/launcher.rasi}" "${pkgs.gtk3}/bin/gtk-launch" ]
       (builtins.readFile ../files/bin/launcher));
+  # macOS ⌘⇧4 (Ctrl+Shift+4): drag a region, saved to ~/Pictures/Screenshots and copied to
+  # the clipboard. xfce4-screenshooter can't do both (with -c it skips -s), so xclip copies the
+  # saved file. Esc cancels: no file, nothing copied.
+  screenshotRegion = pkgs.writeShellScript "screenshot-region" ''
+    dir="$HOME/Pictures/Screenshots"
+    mkdir -p "$dir"
+    f="$dir/Screenshot $(date '+%Y-%m-%d at %H.%M.%S').png"
+    /usr/bin/xfce4-screenshooter -r -s "$f"
+    [ -f "$f" ] && exec ${pkgs.xclip}/bin/xclip -selection clipboard -t image/png -i "$f"
+  '';
 in
 {
   # i3 config with absolute Nix paths, so it never depends on the session's $PATH
   xdg.configFile."i3/config".text =
     builtins.replaceStrings
-      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" "@launcher@" "@applylayout@" ]
+      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" "@launcher@" "@applylayout@" "@screenshotregion@" ]
       [
         "${desk.ghostty}/bin/ghostty"
         "${pkgs.feh}/bin/feh"
@@ -37,6 +47,7 @@ in
         "${wsBar}"
         "${launcher}"
         "${applyLayout}/bin/apply-desk-layout"
+        "${screenshotRegion}"
       ]
       (builtins.readFile ../files/i3/config);
 

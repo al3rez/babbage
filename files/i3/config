@@ -38,6 +38,8 @@ bindsym $mod+Return exec @ghostty@
 bindsym $mod+space exec --no-startup-id @launcher@
 bindsym $mod+d exec xfce4-appfinder
 bindsym $mod+Shift+f exec thunar
+# region screenshot like macOS ⌘⇧4: saved to ~/Pictures/Screenshots and copied to the clipboard
+bindsym Ctrl+Shift+4 exec --no-startup-id @screenshotregion@
 bindsym $mod+q kill
 
 # --- focus / move (arrows and vim keys)
