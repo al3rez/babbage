@@ -116,6 +116,20 @@ let
     Categories=Development;
   '';
 
+  # Google Chrome (Google's .deb, files/bin/install-desktop-apps). Its own entry has New Window /
+  # Incognito actions that focus-or-launch would turn into "focus the open window", so the pin
+  # uses this minimal one; the WhiteSur theme supplies the macOS-style google-chrome icon.
+  chromeDesktop = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Google Chrome
+    Exec=/usr/bin/google-chrome-stable %U
+    Icon=google-chrome
+    StartupWMClass=google-chrome
+    Terminal=false
+    Categories=Network;WebBrowser;
+  '';
+
   # Pinned apps: a click focuses the app's window wherever it is, starts it if it has none,
   # and a double-click opens a new window (files/bin/focus-or-launch). Each launcher's Exec
   # goes through that script, matched on the entry's StartupWMClass.
@@ -139,28 +153,29 @@ let
     "slack.desktop" = slackDesktop;
     "whatsapp.desktop" = whatsappDesktop;
     "tern.desktop" = ternDesktop;
+    "google-chrome.desktop" = chromeDesktop;
   };
   # launcher plugin id -> file; real files, not store links: the launcher plugin copies a file
   # it can't write to a numbered copy and then never sees later changes
   pinnedLaunchers = { "27" = "ghostty.desktop"; "34" = "grok-bot.desktop"; "65" = "chatgpt.desktop";
                       "66" = "t3code.desktop"; "29" = "firefox.desktop"; "70" = "slack.desktop";
-                      "72" = "whatsapp.desktop"; "74" = "tern.desktop"; }
+                      "72" = "whatsapp.desktop"; "74" = "tern.desktop"; "76" = "google-chrome.desktop"; }
     // lib.optionalAttrs dual { "56" = "ghostty.desktop"; "57" = "grok-bot.desktop";
                                "67" = "chatgpt.desktop"; "68" = "t3code.desktop"; "58" = "firefox.desktop"; "71" = "slack.desktop";
-                               "73" = "whatsapp.desktop"; "75" = "tern.desktop"; };
+                               "73" = "whatsapp.desktop"; "75" = "tern.desktop"; "77" = "google-chrome.desktop"; };
   pinnedFarm = pkgs.linkFarm "pinned-launchers" (lib.mapAttrsToList (id: file: {
     name = "launcher-${id}/${file}";
     path = pkgs.writeText file (pinnedEntry pinned.${file});
   }) pinnedLaunchers);
 in
 {
-  # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + Tern + Firefox on the left,
+  # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + Tern + Firefox + Chrome on the left,
   # tray/volume/search/control centre/clock on the right. Its ends line up with i3's
   # window gaps (end spacers + gtk.css padding).
   xfconf.settings.xfce4-panel = {
     "panels" = if dual then [ 1 2 ] else [ 1 ];
     "panels/dark-mode" = true;
-    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 70 72 74 29 3 6 21 25 26 8 33 ];
+    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 70 72 74 29 76 3 6 21 25 26 8 33 ];
 
     # status area (tray and volume keys exist only once, on the primary bar)
     "plugins/plugin-6" = "systray";
@@ -185,6 +200,7 @@ in
   // launcher 27 "ghostty.desktop" // launcher 34 "grok-bot.desktop"
   // launcher 65 "chatgpt.desktop" // launcher 66 "t3code.desktop" // launcher 70 "slack.desktop"
   // launcher 72 "whatsapp.desktop" // launcher 74 "tern.desktop" // launcher 29 "firefox.desktop"
+  // launcher 76 "google-chrome.desktop"
   // separator 3 true                            # middle stretch
   // launcher 25 "spotlight.desktop" // launcher 26 "control-center.desktop"
   // clock 8   # "Fri Oct 30  10:45 PM"
@@ -192,7 +208,7 @@ in
     # LG on the left, ASUS on the right: same bar on each, minus the tray
     "panels/panel-1/output-name" = "DP-2";
     "panels/panel-2/output-name" = "DP-4";
-    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 57 67 68 71 73 75 58 59 60 61 62 63 64 ];
+    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 57 67 68 71 73 75 58 77 59 60 61 62 63 64 ];
     "plugins/plugin-60" = "pulseaudio";
     "plugins/plugin-60/enable-keyboard-shortcuts" = false;  # volume keys are handled once, by plugin-21
   }
@@ -203,6 +219,7 @@ in
   // launcher 56 "ghostty.desktop" // launcher 57 "grok-bot.desktop"
   // launcher 67 "chatgpt.desktop" // launcher 68 "t3code.desktop" // launcher 71 "slack.desktop"
   // launcher 73 "whatsapp.desktop" // launcher 75 "tern.desktop" // launcher 58 "firefox.desktop"
+  // launcher 77 "google-chrome.desktop"
   // separator 59 true
   // launcher 61 "spotlight.desktop" // launcher 62 "control-center.desktop"
   // clock 63);
@@ -244,22 +261,28 @@ in
     done
   '';
 
-  # Pick up panel changes in a running session. genmon keeps its settings in memory and
-  # writes them back to genmon-N.rc when the panel exits, so the workspace slot files are
-  # real (writable) files, only replaced while the panel is stopped.
+  # Pick up panel changes in a running session, restarting the panel only when something it
+  # reads at startup changed: the genmon slot files, or its plugin layout in xfconf (e.g. a new
+  # pinned app; a running panel ignores new plugin ids). genmon keeps its settings in memory and
+  # writes them back to genmon-N.rc when the panel exits, so the slot files are real (writable)
+  # files, only replaced while the panel is stopped.
   home.activation.reloadPanel = lib.hm.dag.entryAfter [ "xfconfSettings" "linkGeneration" ] ''
     panelDir="${config.xdg.configHome}/xfce4/panel"
+    stampFile="${config.xdg.stateHome}/hm-panel-layout"
+    layout="${builtins.hashString "sha256" (builtins.toJSON config.xfconf.settings.xfce4-panel)}"
     stale=
     for f in ${genmonSlots}/*.rc; do
       ${pkgs.diffutils}/bin/cmp -s "$f" "$panelDir/''${f##*/}" || stale=1
     done
+    [ "$(cat "$stampFile" 2>/dev/null)" = "$layout" ] || relayout=1
     running=
     if ${pkgs.procps}/bin/pgrep -x xfce4-panel >/dev/null; then running=1; fi
+    restart=
+    if [ -n "$running" ] && { [ -n "$stale" ] || [ -n "''${relayout:-}" ]; }; then restart=1; fi
 
-    # Only stop the panel when genmon slot files actually changed (not on every hm switch).
     # Never `xfce4-panel -r`: on the two-monitor NVIDIA layout it can bring a bar back unmapped
     # (exists, never shown). A full quit + fresh start maps both.
-    if [ -n "$stale" ] && [ -n "$running" ]; then
+    if [ -n "$restart" ]; then
       run /usr/bin/xfce4-panel -q || true
       for _ in $(seq 50); do ${pkgs.procps}/bin/pgrep -x xfce4-panel >/dev/null || break; sleep 0.1; done
     fi
@@ -269,7 +292,9 @@ in
         run install -m 644 "$f" "$panelDir/''${f##*/}"
       done
     fi
-    if [ -n "$stale" ] && [ -n "$running" ]; then
+    run mkdir -p "$(dirname "$stampFile")"
+    run sh -c 'printf %s "$1" > "$2"' _ "$layout" "$stampFile"
+    if [ -n "$restart" ]; then
       if ${pkgs.procps}/bin/pgrep -x i3 >/dev/null; then
         # Message must be one argv; `i3-msg exec --no-startup-id …` makes i3-msg treat the flag as its own option.
         run ${pkgs.i3}/bin/i3-msg -q 'exec --no-startup-id /usr/bin/xfce4-panel' || true

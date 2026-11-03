@@ -2,6 +2,7 @@
 # Big desktop apps, installed in the background by bootstrap.sh (runs as root via systemd-run).
 #   Grok Bot: Cursor's apt repo (set up by bootstrap.sh)
 #   ChatGPT (incl. Codex): OpenAI's official .deb; it adds OpenAI's signed apt repo, so apt updates it
+#   Google Chrome: Google's official .deb; it adds Google's signed apt repo, so apt updates it
 #   T3 Code: latest nightly .deb from GitHub, checked against the release's sha256 digest
 set -eu
 export DEBIAN_FRONTEND=noninteractive
@@ -13,6 +14,12 @@ if ! dpkg -s chatgpt >/dev/null 2>&1; then
   curl -fL --retry 3 -o "$tmp/chatgpt_amd64.deb" \
     https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb
   apt-get install -y "$tmp/chatgpt_amd64.deb"
+fi
+
+if ! dpkg -s google-chrome-stable >/dev/null 2>&1; then
+  curl -fL --retry 3 -o "$tmp/google-chrome-stable_current_amd64.deb" \
+    https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  apt-get install -y "$tmp/google-chrome-stable_current_amd64.deb"
 fi
 
 # shortcut: nightly is pinned to whatever is newest at install time; re-run this script to update
