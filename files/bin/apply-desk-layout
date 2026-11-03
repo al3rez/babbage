@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# LG (DP-2) + ASUS (DP-4) layout. Does nothing when the layout is already right.
+# Never use plain `xrandr` (non-cached: makes NVIDIA re-probe every DisplayPort and stalls X),
+# never `--auto` (picks the ASUS's 60 Hz preferred mode and drops its +960 offset), never `--off`.
+set -euo pipefail
+command -v nvidia-settings >/dev/null || exit 0
+METAMODE='DP-2: 3840x2160_240 +0+0 {ForceCompositionPipeline=On}, DP-4: 1920x1200_75 +3840+960 {ForceCompositionPipeline=On}'
+WALLPAPER="${WALLPAPER:-$HOME/Pictures/Wallpapers/wallhaven-gp7mq3.jpg}"
+
+layout_ok() {
+  local q
+  q=$(xrandr --current 2>/dev/null) || return 1
+  grep -q '^DP-2 connected primary 3840x2160+0+0' <<<"$q" || return 1
+  grep -q '^DP-4 connected 1920x1200+3840+960' <<<"$q" || return 1
+}
+
+layout_ok && exit 0
+
+nvidia-settings --assign "CurrentMetaMode=${METAMODE}" >/dev/null 2>&1 || true
+xrandr --current --output DP-2 --primary 2>/dev/null || true
+# the root pixmap is sized to the old screen; redraw it so neither monitor is left black
+if [ -f "$WALLPAPER" ]; then
+  feh --no-fehbg --bg-fill "$WALLPAPER" 2>/dev/null || true
+fi
+layout_ok

@@ -1,30 +1,11 @@
 #!@python@
-"""Keep the LG (DP-2) + ASUS (DP-4) NVIDIA layout and both menu bars in place.
+"""Put the LG (DP-2) + ASUS (DP-4) NVIDIA layout back if the driver ever changes it.
 
-The NVIDIA driver can forget the MetaMode (ASUS native 1920x1200 at +3840+960, LG primary)
-when the monitors are replugged. This listens for RandR screen-change events, waits for the
-outputs to settle, and puts the layout back.
-
-It also keeps each xfce4-panel bar on its own monitor. i3 docks a bar on whichever monitor
-the window is on at the moment it maps (i3 src/manage.c), and the panel re-maps its windows
-on its own (e.g. when the compositor restarts), so the ASUS bar can land on the LG. A bar's
-_NET_WM_STRUT_PARTIAL still says which monitor the panel meant it for; one ConfigureRequest
-to that position makes i3 move the dock there (i3 src/handlers.c). Only if that fails is the
-panel restarted. Only the two-monitor case is managed; with either screen unplugged it does
-nothing.
-
-It must never stall the X server, which owns the keyboard and mouse:
-  * only the driver's cached output state is read (RRGetScreenResourcesCurrent); the
-    non-cached request makes the NVIDIA driver re-probe every DisplayPort, blocking X
-    for seconds each time
-  * the layout is never re-applied while the monitors are off or nobody is at the keyboard:
-    a MetaMode sent to sleeping DisplayPort monitors hangs X for ~45s and fails, and
-    retrying that is what kept the screens black and input dead after the idle timeout.
-    The layout is put back a few seconds after the user returns. Reading the layout
-    (RRGetMonitors) is cached in the X server (RRGetInfo(screen, FALSE)), and moving bars
-    is plain window requests, so those happen any time
-  * the only polling is the bar check (window tree, every few seconds); failed attempts
-    back off (30s doubling to 15min); driver calls time out
+Event-driven only: it wakes on RandR events and reads the X server's cached state. When the
+layout is right it does nothing at all. It never touches the panel or the bars, never polls
+the driver, and never re-applies a layout while the monitors are asleep or nobody is at the
+keyboard (a MetaMode sent to sleeping DisplayPort monitors hangs X for ~45s).
+Logs to `journalctl -t monitor-layout-guard`.
 """
 import os
 import select
@@ -32,69 +13,22 @@ import subprocess
 import syslog
 import time
 
-from Xlib import X, display
+from Xlib import display
 from Xlib.ext import dpms, randr
 
-METAMODE = (
-    "DP-2: 3840x2160_240 +0+0 {ForceCompositionPipeline=On}, "
-    "DP-4: 1920x1200_75 +3840+960 {ForceCompositionPipeline=On}"
-)
 WANT = {"DP-2": (0, 0, 3840, 2160), "DP-4": (3840, 960, 1920, 1200)}
-BAR_HEIGHT = 36
-WALLPAPER = os.environ.get("WALLPAPER", os.path.expanduser("~/Pictures/Wallpapers/wallhaven-gp7mq3.jpg"))
-SETTLE = 3.0          # seconds of quiet after the last RandR event (or wake-up) before acting
-DPMS_POLL = 5.0       # while waiting for the user to come back, look this often
-ACTIVE_WITHIN_MS = 60_000   # only touch the layout if there was input in the last minute
-CMD_TIMEOUT = 15      # seconds; a driver call that takes longer is abandoned
-BAR_POLL = 5.0        # also look at the bars this often (window tree only, never the driver)
-BACKOFF_MIN, BACKOFF_MAX = 30.0, 900.0
-
+SETTLE = 3.0            # quiet seconds after the last RandR event before checking
+IDLE_RECHECK = 5.0      # while monitors sleep / user away, look again this often
+ACTIVE_WITHIN_MS = 60_000
+CMD_TIMEOUT = 30
+RETRY_MIN, RETRY_MAX = 10.0, 300.0
+APPLY = os.environ["APPLY_DESK_LAYOUT"]
 
 syslog.openlog("monitor-layout-guard", 0, syslog.LOG_USER)
 
 
 def log(msg):
     syslog.syslog(syslog.LOG_NOTICE, msg)
-
-
-def run(*cmd):
-    try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=CMD_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        log(f"timed out after {CMD_TIMEOUT}s: {cmd[0]}")
-
-
-def restart_panel():
-    # quit + fresh start, not `xfce4-panel -r`: -r can bring a bar back unmapped
-    run("xfce4-panel", "-q")
-    for _ in range(50):
-        if subprocess.run(["pgrep", "-x", "xfce4-panel"], stdout=subprocess.DEVNULL).returncode:
-            break
-        time.sleep(0.1)
-    subprocess.Popen(["xfce4-panel"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
-
-
-def user_present(d):
-    """Monitors on and someone used the keyboard/mouse recently. Checked twice over because
-    the NVIDIA driver does not always report DPMS-off; the idle timer is what dims the
-    screens, so recent input reliably means they are awake."""
-    info = d.dpms_info()
-    if info.state and info.power_level != dpms.DPMSModeOn:
-        return False
-    return d.screen().root.screensaver_query_info().idle < ACTIVE_WITHIN_MS
-
-
-def monitors(d):
-    """Active monitors as {name: (x, y, w, h)} and the primary's name."""
-    res = randr.get_monitors(d.screen().root, True)
-    out, primary = {}, None
-    for m in res.monitors:
-        name = d.get_atom_name(m.name)
-        out[name] = (m.x, m.y, m.width_in_pixels, m.height_in_pixels)
-        if m.primary:
-            primary = name
-    return out, primary
 
 
 def connected(d):
@@ -108,101 +42,36 @@ def connected(d):
     return names
 
 
-def panel_bars(d):
-    """Every menu-bar window (36px tall xfce4-panel) that is actually shown:
-    (window, x, y, width, strut) with strut = _NET_WM_STRUT_PARTIAL or None."""
-    bars = []
-    strut_atom = d.intern_atom("_NET_WM_STRUT_PARTIAL")
-    def walk(w):
-        try:
-            cls = w.get_wm_class()
-            if cls and cls[0] == "xfce4-panel":
-                g = w.get_geometry()
-                if g.height == BAR_HEIGHT and w.get_attributes().map_state == X.IsViewable:
-                    t = w.translate_coords(d.screen().root, 0, 0)
-                    p = w.get_full_property(strut_atom, X.AnyPropertyType)
-                    bars.append((w, -t.x, -t.y, g.width, list(p.value) if p and len(p.value) == 12 else None))
-            for c in w.query_tree().children:
-                walk(c)
-        except Exception:
-            pass
-    walk(d.screen().root)
-    return bars
-
-
 def layout_ok(d):
-    mons, primary = monitors(d)
+    mons, primary = {}, None
+    for m in randr.get_monitors(d.screen().root, True).monitors:
+        name = d.get_atom_name(m.name)
+        mons[name] = (m.x, m.y, m.width_in_pixels, m.height_in_pixels)
+        if m.primary:
+            primary = name
     return primary == "DP-2" and all(mons.get(n) == g for n, g in WANT.items())
 
 
-def bars_ok(d):
-    have = sorted((x, y, w) for _, x, y, w, _ in panel_bars(d))
-    want = sorted((x, y, w) for x, y, w, _ in WANT.values())
-    return have == want
+def user_present(d):
+    info = d.dpms_info()
+    if info.state and info.power_level != dpms.DPMSModeOn:
+        return False
+    return d.screen().root.screensaver_query_info().idle < ACTIVE_WITHIN_MS
 
 
-def meant_for(strut):
-    """The (x, y) of the monitor a bar's strut reserves space on: its top edge is the
-    monitor's y + bar height, its x range lies inside the monitor."""
-    if not strut:
+def check(d):
+    """Seconds until the next check, or None when nothing is pending."""
+    if not WANT.keys() <= connected(d) or layout_ok(d):
         return None
-    top, x0, x1 = strut[2], strut[8], strut[9]
-    hits = [(mx, my) for mx, my, mw, _ in WANT.values()
-            if my + BAR_HEIGHT == top and mx <= (x0 + x1) // 2 < mx + mw]
-    if not hits:   # x range can be off while i3 has the bar stretched on the wrong monitor
-        hits = [(mx, my) for mx, my, _, _ in WANT.values() if my + BAR_HEIGHT == top]
-    return hits[0] if len(hits) == 1 else None
-
-
-def reseat_bars(d):
-    """Ask i3 to move each misplaced bar to the monitor the panel meant it for."""
-    for w, x, y, _, strut in panel_bars(d):
-        target = meant_for(strut)
-        if target and (x, y) != target:
-            w.configure(x=target[0], y=target[1])
-    d.sync()
-
-
-def fix_bars(d):
-    """Put both menu bars on their monitors. True when they are (or there is no panel)."""
-    if bars_ok(d):
-        return True
-    time.sleep(1.5)   # the panel moves its bars itself on most changes; give it a moment
-    if bars_ok(d):
-        return True
-    log("menu bars not on their monitors; moving them back")
-    reseat_bars(d)
-    time.sleep(1.0)
-    if bars_ok(d):
-        return True
-    if subprocess.run(["pgrep", "-x", "xfce4-panel"], stdout=subprocess.DEVNULL).returncode != 0:
-        return True   # no panel running: nothing to fix
-    log("menu bars missing or still misplaced; restarting the panel")
-    restart_panel()
-    time.sleep(5.0)
-    reseat_bars(d)    # the fresh panel can lose the same race
-    time.sleep(1.0)
-    if bars_ok(d):
-        return True
-    log("bars still wrong after the restart")
-    return False
-
-
-def fix(d):
-    """Returns True when everything is in place (or there is nothing to manage)."""
-    if not WANT.keys() <= connected(d):
-        return True
-    if not layout_ok(d):
-        log("layout differs from the expected one; re-applying MetaMode")
-        run("nvidia-settings", "--assign", f"CurrentMetaMode={METAMODE}")
-        run("xrandr", "--output", "DP-2", "--primary")
-        if os.path.exists(WALLPAPER):
-            run("feh", "--no-fehbg", "--bg-fill", WALLPAPER)
-        time.sleep(1.0)   # let the panel and i3 see the new outputs
-        if not layout_ok(d):
-            log("re-apply did not take")
-            return False
-    return fix_bars(d)
+    if not user_present(d):
+        return IDLE_RECHECK
+    log("layout differs from the expected one; re-applying")
+    try:
+        subprocess.run([APPLY], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=CMD_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        log(f"apply-desk-layout timed out after {CMD_TIMEOUT}s")
+    return None if layout_ok(d) else RETRY_MIN
 
 
 def main():
@@ -212,60 +81,29 @@ def main():
                        | randr.RRCrtcChangeNotifyMask)
     d.flush()
     fd = d.fileno()
-    pending_since = time.monotonic()   # check once at start
-    backoff, not_before = BACKOFF_MIN, 0.0
+    due = time.monotonic() + SETTLE      # one check after login
+    retry = RETRY_MIN
     while True:
-        if pending_since is None:
-            timeout = BAR_POLL
-        else:
-            timeout = max(SETTLE - (time.monotonic() - pending_since), not_before - time.monotonic(), 0.1)
+        timeout = None if due is None else max(due - time.monotonic(), 0.0)
         r, _, _ = select.select([fd], [], [], timeout)
         if r:
             while d.pending_events():
-                d.next_event()   # only RandR events are selected; any of them means "re-check"
-                pending_since = time.monotonic()
-            continue
-        now = time.monotonic()
-        if pending_since is None:
-            # quiet period: a bar can move or vanish without any RandR event. Fixing bars is
-            # only window moves (no driver calls), so it doesn't wait for the user; a wrong
-            # layout does (the gated path below).
-            if now < not_before:
-                continue
-            try:
-                bars_wrong = WANT.keys() <= connected(d) and not bars_ok(d)
-                if bars_wrong and not layout_ok(d):
-                    pending_since = now - SETTLE
-                elif bars_wrong and not fix_bars(d):
-                    log(f"backing off {int(backoff)}s")
-                    not_before = now + backoff
-                    backoff = min(backoff * 2, BACKOFF_MAX)
-                elif bars_wrong:
-                    backoff = BACKOFF_MIN
-            except Exception as e:
-                log(f"bar check failed ({e!r})")
-            if pending_since is None:
-                continue
-        if now - pending_since < SETTLE or now < not_before:
+                d.next_event()
+            due = time.monotonic() + SETTLE
+            retry = RETRY_MIN
             continue
         try:
-            if WANT.keys() <= connected(d) and not layout_ok(d) and not user_present(d):
-                # the layout needs the driver: not while the monitors are asleep / nobody's here
-                pending_since = now - SETTLE + DPMS_POLL
-                continue
-            if fix(d):
-                backoff, not_before = BACKOFF_MIN, 0.0
-            else:
-                log(f"backing off {int(backoff)}s")
-                not_before = now + backoff
-                backoff = min(backoff * 2, BACKOFF_MAX)
-                continue      # keep pending_since: retry once the backoff expires
+            wait = check(d)
         except Exception as e:
-            log(f"check failed ({e!r}); backing off {int(backoff)}s")
-            not_before = now + backoff
-            backoff = min(backoff * 2, BACKOFF_MAX)
-            continue
-        pending_since = None
+            log(f"check failed ({e!r})")
+            wait = retry
+        if wait is None:
+            due, retry = None, RETRY_MIN
+        else:
+            if wait == RETRY_MIN:
+                wait, retry = retry, min(retry * 2, RETRY_MAX)
+                log(f"layout still wrong; retrying in {int(wait)}s")
+            due = time.monotonic() + wait
 
 
 if __name__ == "__main__":

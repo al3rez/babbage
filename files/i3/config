@@ -26,7 +26,8 @@ for_window [window_type="dialog"] floating enable
 for_window [window_type="menu"] floating enable
 no_focus [class="Xfce4-notifyd"]
 
-# --- startup
+# --- startup (layout before wallpaper so the LG never flashes ASUS-only geometry)
+exec --no-startup-id @applylayout@
 exec --no-startup-id @picom@ --config "@picomconf@"
 exec --no-startup-id @feh@ --no-fehbg --bg-fill "@wallpaper@"
 # workspace numbers in the xfce4-panel bars (genmon slots); exits if already running

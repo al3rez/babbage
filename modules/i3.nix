@@ -2,6 +2,13 @@
 
 let
   # workspace numbers for the xfce4-panel bars (genmon slots are set up in modules/panel.nix)
+  applyLayout =
+    if config.desk.monitors.nvidia then
+      pkgs.writeShellScriptBin "apply-desk-layout" (
+        lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ../files/bin/apply-desk-layout)
+      )
+    else
+      "${pkgs.coreutils}/bin/true";
   wsBar = pkgs.writeScript "i3-ws-bar"
     (builtins.replaceStrings
       [ "@python@" "@i3@" "@i3msg@" "@gdbus@" ]
@@ -18,7 +25,7 @@ in
   # i3 config with absolute Nix paths, so it never depends on the session's $PATH
   xdg.configFile."i3/config".text =
     builtins.replaceStrings
-      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" "@launcher@" ]
+      [ "@ghostty@" "@feh@" "@wallpaper@" "@dunst@" "@dunstctl@" "@picom@" "@picomconf@" "@i3wsbar@" "@launcher@" "@applylayout@" ]
       [
         "${desk.ghostty}/bin/ghostty"
         "${pkgs.feh}/bin/feh"
@@ -29,6 +36,7 @@ in
         "${config.xdg.configHome}/picom/picom.conf"
         "${wsBar}"
         "${launcher}"
+        "${applyLayout}/bin/apply-desk-layout"
       ]
       (builtins.readFile ../files/i3/config);
 
