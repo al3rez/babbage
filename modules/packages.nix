@@ -30,6 +30,22 @@
       done
     fi
   '';
+  # slack:// links ("Open in the Slack app" in Firefox): Firefox's XDG_DATA_DIRS doesn't include
+  # ~/.nix-profile/share, so it can't see Slack's own entry there; this one is always found
+  # (same name, so it also replaces that entry) and runs the GPU-wrapped Slack
+  xdg.dataFile."applications/slack.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Slack
+    Comment=Slack Desktop
+    Exec=${desk.slack}/bin/slack -s %U
+    Icon=slack-mac
+    StartupWMClass=Slack
+    Terminal=false
+    Categories=Network;InstantMessaging;
+    MimeType=x-scheme-handler/slack;
+  '';
+
   # on XFCE, xdg-open hands web links to exo-open, which uses XFCE's own preferred browser
   # (asks with a dialog when none is set)
   xdg.configFile."xfce4/helpers.rc".text = ''
