@@ -15,8 +15,8 @@ uniform float corner_radius;   // pixels; 0 for fullscreen and other square wind
 vec4 default_post_processing(vec4 c);
 
 const vec2  LIGHT    = vec2(-0.7071, -0.7071); // towards the light: top-left
-const float SHARP    = 6.0;   // specular exponent: how tightly the glint hugs the lit corner
-const float BACK     = 0.5;   // reflected glint at the opposite (bottom-right) corner
+const float SHARP    = 3.0;   // specular exponent: lower = glint spreads to the top-right corner too
+const float BACK     = 0.35;  // reflected glint at the opposite (bottom-right) corner
 const float LENGTH   = 90.0;  // px along each edge over which a glint fades out
 const float CORE     = 0.75;  // white mix of the glint line
 const float CORE_W   = 0.75;  // glint line width (px) away from the corner...
@@ -25,9 +25,9 @@ const float BLOOM    = 0.32;  // glow inward from the line
 const float BLOOM_W  = 3.0;   // glow falloff (px)
 const float SHEEN    = 0.10;  // broad light inside the lit corner (dark content only)
 const float SHEEN_W  = 12.0;  // sheen falloff (px)
-const float BAND     = 0.20;  // refraction shadow inside the glint (light content only)
+const float BAND     = 0.12;  // refraction shadow inside the glint (light content only)
 const float BAND_AT  = 2.0;   // its distance past the glint line (px)
-const float BAND_W   = 3.5;   // its width (px)
+const float BAND_W   = 2.6;   // its width (px)
 
 vec4 window_shader() {
     vec4 c = texture(tex, texcoord / vec2(textureSize(tex, 0)));
