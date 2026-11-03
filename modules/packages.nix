@@ -4,6 +4,7 @@
   home.packages = [
     desk.ghostty
     desk.telegram
+    desk.slack
     desk.picom
     pkgs.i3
     pkgs.dunst

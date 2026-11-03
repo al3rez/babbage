@@ -58,6 +58,7 @@ in
     ghostty = gl pkgs.ghostty;
     telegram = gl pkgs.telegram-desktop;
     picom = gl pkgs.picom;
+    slack = gl pkgs.slack;
     wallpaper = pkgs.fetchurl {
       name = "wallhaven-gp7mq3.jpg";
       url = "https://w.wallhaven.cc/full/gp/wallhaven-gp7mq3.jpg";
