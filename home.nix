@@ -39,6 +39,7 @@ in
   home.homeDirectory = "/home/al3rez";
   home.stateVersion = "25.05";
   programs.home-manager.enable = true;
+  news.display = "silent";   # no "N unread news items" after every switch
 
   # Debian (not NixOS): set up XDG/session plumbing for Nix-installed apps, plus nixGL's
   # Mesa wrapper for Nix GUI apps on non-NVIDIA machines

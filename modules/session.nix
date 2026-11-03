@@ -1,10 +1,9 @@
 { pkgs, ... }:
 
 {
-  # Bangkok (ICT, UTC+7). Debian defaults to US/Eastern on this install; session TZ fixes
-  # panel clock, shells, and GUI apps without waiting on timedatectl.
+  # Timezone is the system's (bootstrap.sh: timedatectl set-timezone Asia/Bangkok); no TZ
+  # variable here, it would silently override any later timedatectl change.
   home.sessionVariables = {
-    TZ = "Asia/Bangkok";
     # same cursor for apps that read the env instead of XSETTINGS (Qt, Electron); keep in
     # sync with Gtk/CursorThemeName/Size in modules/xfce.nix
     XCURSOR_THEME = "mate-black";

@@ -50,9 +50,9 @@ in
       src="${../files/xorg/20-nvidia-desk.conf}"
       dest="/etc/X11/xorg.conf.d/20-nvidia-desk.conf"
       if [ -f "$dest" ] && ! ${pkgs.diffutils}/bin/cmp -s "$src" "$dest"; then
-        $DRY_RUN_CMD echo "WARNING: $dest differs from home-manager — run: install-nvidia-desk-xorg"
+        $DRY_RUN_CMD echo "WARNING: $dest differs from home-manager; run: sudo install -Dm644 $src $dest"
       elif [ ! -f "$dest" ]; then
-        $DRY_RUN_CMD echo "WARNING: missing $dest — run: install-nvidia-desk-xorg (once, sudo/pkexec)"
+        $DRY_RUN_CMD echo "WARNING: missing $dest; run: sudo install -Dm644 $src $dest"
       fi
     '';
   };
