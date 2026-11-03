@@ -90,6 +90,20 @@ let
     Terminal=false
   '';
 
+  # WhatsApp as a web app, the way Omarchy does it (omarchy-launch-webapp): WhatsApp Web in a
+  # Chromium app window (no tabs or address bar), with its own window class so a click on the
+  # pin finds this window and not other Chromium windows
+  whatsappDesktop = ''
+    [Desktop Entry]
+    Type=Application
+    Name=WhatsApp
+    Comment=WhatsApp Web in its own window
+    Exec=${desk.chromium}/bin/chromium --app=https://web.whatsapp.com/ --class=WhatsApp
+    Icon=whatsapp-mac
+    StartupWMClass=WhatsApp
+    Terminal=false
+  '';
+
   # Pinned apps: a click focuses the app's window wherever it is, starts it if it has none,
   # and a double-click opens a new window (files/bin/focus-or-launch). Each launcher's Exec
   # goes through that script, matched on the entry's StartupWMClass.
@@ -111,26 +125,29 @@ let
     "t3code.desktop" = builtins.readFile ../files/panel/t3code.desktop;
     "firefox.desktop" = builtins.readFile ../files/panel/launcher-29/firefox.desktop;
     "slack.desktop" = slackDesktop;
+    "whatsapp.desktop" = whatsappDesktop;
   };
   # launcher plugin id -> file; real files, not store links: the launcher plugin copies a file
   # it can't write to a numbered copy and then never sees later changes
   pinnedLaunchers = { "27" = "ghostty.desktop"; "34" = "grok-bot.desktop"; "65" = "chatgpt.desktop";
-                      "66" = "t3code.desktop"; "29" = "firefox.desktop"; "70" = "slack.desktop"; }
+                      "66" = "t3code.desktop"; "29" = "firefox.desktop"; "70" = "slack.desktop";
+                      "72" = "whatsapp.desktop"; }
     // lib.optionalAttrs dual { "56" = "ghostty.desktop"; "57" = "grok-bot.desktop";
-                               "67" = "chatgpt.desktop"; "68" = "t3code.desktop"; "58" = "firefox.desktop"; "71" = "slack.desktop"; };
+                               "67" = "chatgpt.desktop"; "68" = "t3code.desktop"; "58" = "firefox.desktop"; "71" = "slack.desktop";
+                               "73" = "whatsapp.desktop"; };
   pinnedFarm = pkgs.linkFarm "pinned-launchers" (lib.mapAttrsToList (id: file: {
     name = "launcher-${id}/${file}";
     path = pkgs.writeText file (pinnedEntry pinned.${file});
   }) pinnedLaunchers);
 in
 {
-  # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + Firefox on the left,
+  # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + Firefox on the left,
   # tray/volume/search/control centre/clock on the right. Its ends line up with i3's
   # window gaps (end spacers + gtk.css padding).
   xfconf.settings.xfce4-panel = {
     "panels" = if dual then [ 1 2 ] else [ 1 ];
     "panels/dark-mode" = true;
-    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 70 29 3 6 21 25 26 8 33 ];
+    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 70 72 29 3 6 21 25 26 8 33 ];
 
     # status area (tray and volume keys exist only once, on the primary bar)
     "plugins/plugin-6" = "systray";
@@ -153,7 +170,8 @@ in
   // separator 32 false // separator 33 false   # left/right end spacers
   // separator 44 false                          # gap between workspaces and apps
   // launcher 27 "ghostty.desktop" // launcher 34 "grok-bot.desktop"
-  // launcher 65 "chatgpt.desktop" // launcher 66 "t3code.desktop" // launcher 70 "slack.desktop" // launcher 29 "firefox.desktop"
+  // launcher 65 "chatgpt.desktop" // launcher 66 "t3code.desktop" // launcher 70 "slack.desktop"
+  // launcher 72 "whatsapp.desktop" // launcher 29 "firefox.desktop"
   // separator 3 true                            # middle stretch
   // launcher 25 "spotlight.desktop" // launcher 26 "control-center.desktop"
   // clock 8   # "Fri Oct 30  10:45 PM"
@@ -161,7 +179,7 @@ in
     # LG on the left, ASUS on the right: same bar on each, minus the tray
     "panels/panel-1/output-name" = "DP-2";
     "panels/panel-2/output-name" = "DP-4";
-    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 57 67 68 71 58 59 60 61 62 63 64 ];
+    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 57 67 68 71 73 58 59 60 61 62 63 64 ];
     "plugins/plugin-60" = "pulseaudio";
     "plugins/plugin-60/enable-keyboard-shortcuts" = false;  # volume keys are handled once, by plugin-21
   }
@@ -170,7 +188,8 @@ in
   // separator 45 false // separator 64 false
   // separator 55 false
   // launcher 56 "ghostty.desktop" // launcher 57 "grok-bot.desktop"
-  // launcher 67 "chatgpt.desktop" // launcher 68 "t3code.desktop" // launcher 71 "slack.desktop" // launcher 58 "firefox.desktop"
+  // launcher 67 "chatgpt.desktop" // launcher 68 "t3code.desktop" // launcher 71 "slack.desktop"
+  // launcher 73 "whatsapp.desktop" // launcher 58 "firefox.desktop"
   // separator 59 true
   // launcher 61 "spotlight.desktop" // launcher 62 "control-center.desktop"
   // clock 63);

@@ -1,10 +1,11 @@
-{ pkgs, desk, ... }:
+{ pkgs, lib, desk, ... }:
 
 {
   home.packages = [
     desk.ghostty
     desk.telegram
     desk.slack
+    desk.chromium
     desk.picom
     pkgs.i3
     pkgs.dunst
@@ -17,4 +18,21 @@
   ];
 
   fonts.fontconfig.enable = true;
+
+  # Web links open in Firefox. Without a default, xdg-open picks whichever app claims http(s)
+  # first, which is ChatGPT's .deb, so links clicked in Slack and other apps went there.
+  # Set with xdg-mime (not xdg.mimeApps) so mimeapps.list stays a normal file that apps like
+  # Telegram can still add their own link types to.
+  home.activation.webBrowser = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ -e /usr/share/applications/firefox-esr.desktop ]; then
+      for t in x-scheme-handler/http x-scheme-handler/https text/html application/xhtml+xml; do
+        run ${pkgs.xdg-utils}/bin/xdg-mime default firefox-esr.desktop "$t"
+      done
+    fi
+  '';
+  # on XFCE, xdg-open hands web links to exo-open, which uses XFCE's own preferred browser
+  # (asks with a dialog when none is set)
+  xdg.configFile."xfce4/helpers.rc".text = ''
+    WebBrowser=firefox
+  '';
 }

@@ -59,6 +59,7 @@ in
     telegram = gl pkgs.telegram-desktop;
     picom = gl pkgs.picom;
     slack = gl pkgs.slack;
+    chromium = gl pkgs.chromium;   # runs web apps (WhatsApp) in their own windows, like Omarchy
     wallpaper = pkgs.fetchurl {
       name = "wallhaven-gp7mq3.jpg";
       url = "https://w.wallhaven.cc/full/gp/wallhaven-gp7mq3.jpg";
