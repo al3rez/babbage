@@ -16,6 +16,18 @@
     # Inter is the system UI font; the Nerd Font symbols cover prompt/tab icons
     pkgs.inter
     pkgs.nerd-fonts.symbols-only
+
+    # Nix GUI apps (wrapGAppsHook, nixglhost: Tern, Ghostty, ...) export LD_LIBRARY_PATH and
+    # GIO/GDK module paths pointing at Nix's glib. Links they open run Debian's xdg-open ->
+    # exo-open -> firefox-esr with that env, which die at once ("GLIBC_2.43 not found"), so
+    # clicking a link did nothing. This xdg-open comes first on their PATH and hands over a
+    # clean env.
+    (lib.hiPrio (pkgs.writeShellScriptBin "xdg-open" ''
+      unset LD_LIBRARY_PATH LD_PRELOAD GIO_EXTRA_MODULES GDK_PIXBUF_MODULE_FILE GTK_PATH \
+        GST_PLUGIN_SYSTEM_PATH GST_PLUGIN_SYSTEM_PATH_1_0 LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH \
+        __EGL_VENDOR_LIBRARY_DIRS __GLX_VENDOR_LIBRARY_NAME
+      exec /usr/bin/xdg-open "$@"
+    ''))
   ];
 
   fonts.fontconfig.enable = true;
