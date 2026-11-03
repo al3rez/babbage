@@ -256,9 +256,10 @@ in
     running=
     if ${pkgs.procps}/bin/pgrep -x xfce4-panel >/dev/null; then running=1; fi
 
+    # Only stop the panel when genmon slot files actually changed (not on every hm switch).
     # Never `xfce4-panel -r`: on the two-monitor NVIDIA layout it can bring a bar back unmapped
     # (exists, never shown). A full quit + fresh start maps both.
-    if [ -n "$running" ]; then
+    if [ -n "$stale" ] && [ -n "$running" ]; then
       run /usr/bin/xfce4-panel -q || true
       for _ in $(seq 50); do ${pkgs.procps}/bin/pgrep -x xfce4-panel >/dev/null || break; sleep 0.1; done
     fi
@@ -268,9 +269,10 @@ in
         run install -m 644 "$f" "$panelDir/''${f##*/}"
       done
     fi
-    if [ -n "$running" ]; then
+    if [ -n "$stale" ] && [ -n "$running" ]; then
       if ${pkgs.procps}/bin/pgrep -x i3 >/dev/null; then
-        run ${pkgs.i3}/bin/i3-msg -q exec --no-startup-id /usr/bin/xfce4-panel || true
+        # Message must be one argv; `i3-msg exec --no-startup-id …` makes i3-msg treat the flag as its own option.
+        run ${pkgs.i3}/bin/i3-msg -q 'exec --no-startup-id /usr/bin/xfce4-panel' || true
       else
         run setsid -f /usr/bin/xfce4-panel >/dev/null 2>&1 || true
       fi
