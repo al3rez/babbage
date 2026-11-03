@@ -6,6 +6,7 @@
     desk.telegram
     desk.slack
     desk.chromium
+    desk.tern
     desk.picom
     pkgs.i3
     pkgs.dunst

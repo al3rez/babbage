@@ -60,6 +60,7 @@ in
     picom = gl pkgs.picom;
     slack = gl pkgs.slack;
     chromium = gl pkgs.chromium;   # runs web apps (WhatsApp) in their own windows, like Omarchy
+    tern = gl (pkgs.callPackage ./files/pkgs/tern.nix { });   # Stencil's prebuilt tarball
     wallpaper = pkgs.fetchurl {
       name = "wallhaven-gp7mq3.jpg";
       url = "https://w.wallhaven.cc/full/gp/wallhaven-gp7mq3.jpg";
