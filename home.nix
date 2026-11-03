@@ -32,6 +32,7 @@ in
     ./modules/shell.nix
     ./modules/monitors.nix
     ./modules/power.nix
+    ./modules/network.nix
   ];
 
   home.username = "al3rez";
@@ -48,6 +49,10 @@ in
       defaultWrapper = "mesa";
       installScripts = [ "mesa" ];
     };
+    # GL apps get their drivers from the wrappers above (nix-gl-host on NVIDIA, nixGL elsewhere).
+    # Home Manager's own GPU module would need the NVIDIA .run from download.nvidia.com (404 for
+    # this CUDA-repo driver) plus a root setup step, and warned on every switch.
+    gpu.enable = false;
   };
   xdg.enable = true;
 
