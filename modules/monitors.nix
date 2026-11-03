@@ -30,7 +30,7 @@ in
           "DISPLAY=:0"
           "WALLPAPER=${desk.wallpaper}"
           "APPLY_DESK_LAYOUT=${applyLayout}/bin/apply-desk-layout"
-          "PATH=${lib.makeBinPath [ pkgs.feh pkgs.procps pkgs.i3 pkgs.xorg.xrandr ]}:/usr/bin:/bin"
+          "PATH=${lib.makeBinPath [ pkgs.feh pkgs.procps pkgs.i3 pkgs.xrandr ]}:/usr/bin:/bin"
         ];
         ExecStart = guard;
         Restart = "always";
