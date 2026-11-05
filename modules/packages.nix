@@ -1,5 +1,10 @@
 { pkgs, lib, desk, ... }:
 
+let
+  steam = pkgs.writeShellScriptBin "steam" ''
+    exec ${pkgs.flatpak}/bin/flatpak run com.valvesoftware.Steam "$@"
+  '';
+in
 {
   home.packages = [
     desk.ghostty
@@ -12,6 +17,8 @@
     pkgs.dunst
     pkgs.libnotify
     pkgs.feh
+    # Steam's Flatpak supplies matching 64/32-bit NVIDIA runtimes on this Debian host.
+    pkgs.flatpak
 
     # Inter is the system UI font; the Nerd Font symbols cover prompt/tab icons
     pkgs.inter
@@ -19,9 +26,8 @@
 
     # Nix GUI apps (wrapGAppsHook, nixglhost: Tern, Ghostty, ...) export LD_LIBRARY_PATH and
     # GIO/GDK module paths pointing at Nix's glib. Links they open run Debian's xdg-open ->
-    # exo-open -> firefox-esr with that env, which die at once ("GLIBC_2.43 not found"), so
-    # clicking a link did nothing. This xdg-open comes first on their PATH and hands over a
-    # clean env.
+    # exo-open -> a host browser with that env, which can die with "GLIBC_2.43 not found".
+    # This xdg-open comes first on their PATH and hands over a clean env.
     (lib.hiPrio (pkgs.writeShellScriptBin "xdg-open" ''
       unset LD_LIBRARY_PATH LD_PRELOAD GIO_EXTRA_MODULES GDK_PIXBUF_MODULE_FILE GTK_PATH \
         GST_PLUGIN_SYSTEM_PATH GST_PLUGIN_SYSTEM_PATH_1_0 LIBGL_DRIVERS_PATH GBM_BACKENDS_PATH \
@@ -32,11 +38,37 @@
 
   fonts.fontconfig.enable = true;
 
+  home.file.".local/bin/steam".source = "${steam}/bin/steam";
+
+  # Debian's session bus does not discover service files in the Nix profile.
+  # Flatpak needs these for sandbox restarts and launching host helpers.
+  xdg.dataFile = {
+    "dbus-1/services/org.freedesktop.portal.Flatpak.service".source =
+      "${pkgs.flatpak}/share/dbus-1/services/org.freedesktop.portal.Flatpak.service";
+    "dbus-1/services/org.freedesktop.Flatpak.service".source =
+      "${pkgs.flatpak}/share/dbus-1/services/org.freedesktop.Flatpak.service";
+    "dbus-1/services/org.flatpak.Authenticator.Oci.service".source =
+      "${pkgs.flatpak}/share/dbus-1/services/org.flatpak.Authenticator.Oci.service";
+  };
+  xdg.configFile = {
+    "systemd/user/flatpak-portal.service".source = "${pkgs.flatpak}/lib/systemd/user/flatpak-portal.service";
+    "systemd/user/flatpak-session-helper.service".source = "${pkgs.flatpak}/lib/systemd/user/flatpak-session-helper.service";
+    "systemd/user/flatpak-oci-authenticator.service".source = "${pkgs.flatpak}/lib/systemd/user/flatpak-oci-authenticator.service";
+  };
+
+  home.activation.steam = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    run ${pkgs.flatpak}/bin/flatpak remote-add --user --if-not-exists flathub \
+      https://flathub.org/repo/flathub.flatpakrepo
+    if ! ${pkgs.flatpak}/bin/flatpak info --user com.valvesoftware.Steam >/dev/null 2>&1; then
+      run ${pkgs.flatpak}/bin/flatpak install --user --noninteractive -y flathub com.valvesoftware.Steam
+    fi
+  '';
+
   # Web links open in Google Chrome. Without a default, xdg-open picks whichever app claims
   # http(s) first, which is ChatGPT's .deb, so links clicked in Slack and other apps went there.
   # Set with xdg-mime (not xdg.mimeApps) so mimeapps.list stays a normal file that apps like
   # Telegram can still add their own link types to. Debian's x-www-browser already points at
-  # Chrome: its .deb registers that alternative at a higher priority than Firefox ESR.
+  # Chrome: its .deb registers the browser alternative.
   home.activation.webBrowser = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     if [ -e /usr/share/applications/google-chrome.desktop ]; then
       for t in x-scheme-handler/http x-scheme-handler/https text/html application/xhtml+xml; do
@@ -44,9 +76,8 @@
       done
     fi
   '';
-  # slack:// links ("Open in the Slack app" in the browser): Firefox's XDG_DATA_DIRS doesn't include
-  # ~/.nix-profile/share, so it can't see Slack's own entry there; this one is always found
-  # (same name, so it also replaces that entry) and runs the GPU-wrapped Slack
+  # slack:// links ("Open in the Slack app" in the browser): host browsers may not search
+  # ~/.nix-profile/share, so keep the GPU-wrapped Slack entry in the standard user app directory.
   xdg.dataFile."applications/slack.desktop".text = ''
     [Desktop Entry]
     Type=Application

@@ -1,4 +1,4 @@
-{ ... }:
+{ pkgs, ... }:
 
 {
   # Like macOS `caffeinate -s`: monitors turn off after 10 idle minutes, the computer never sleeps.
@@ -10,6 +10,24 @@
     "xfce4-power-manager/inactivity-on-ac" = 14;  # 14 = never put the system to sleep
     "xfce4-power-manager/presentation-mode" = false;
     "xfce4-power-manager/lock-screen-suspend-hibernate" = false;
+  };
+
+  # XFCE's blank-on-ac=0 does not clear the X server's default 600s screensaver.
+  # DPMS remains owned by xfce4-power-manager.
+  systemd.user.services.display-blanking = {
+    Unit = {
+      Description = "Disable X screensaver blanking; keep XFCE DPMS";
+      StartLimitIntervalSec = 0;
+    };
+    Service = {
+      Type = "oneshot";
+      Environment = [ "DISPLAY=:0" ];
+      ExecStart = "${pkgs.xset}/bin/xset s off";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = "2";
+    };
+    Install.WantedBy = [ "default.target" ];
   };
 
   # Hold a logind sleep block for the whole session, so nothing else (a tool, the sleep key,
