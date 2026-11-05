@@ -1,5 +1,6 @@
-/* Raycast-style launcher (files/bin/launcher). Sizes are Raycast's points at the desktop's
- * 1.5x scale (144 DPI); picom blurs what's behind the window (files/picom/picom.conf). */
+/* Minimal Raycast-style launcher (files/bin/launcher): search field + apps. Sizes are Raycast's
+ * points at the desktop's 1.5x scale (144 DPI); picom blurs what's behind the window
+ * (files/picom/picom.conf). */
 configuration {
   dpi: 144;
   icon-theme: "WhiteSur-Mac";
@@ -9,9 +10,7 @@ configuration {
 * {
   font: "Inter 10";
   primary: rgba(255, 255, 255, 0.92);
-  secondary: rgba(255, 255, 255, 0.50);
   hairline: rgba(255, 255, 255, 0.08);
-  key: rgba(255, 255, 255, 0.10);
   background-color: transparent;
   text-color: @primary;
   margin: 0;
@@ -31,42 +30,23 @@ window {
 }
 
 mainbox {
-  children: [ inputbar, listview, footer ];
+  children: [ inputbar, listview ];
 }
 
-/* search field, "Ask AI [Tab]" on the right */
 inputbar {
-  children: [ entry, textbox-ask, textbox-tab ];
+  children: [ entry ];
   expand: false;
   padding: 25px 24px 25px 26px;
-  spacing: 12px;
   border: 0 0 1px 0;
   border-color: @hairline;
 }
 entry {
   font: "Inter 12";
   vertical-align: 0.5;
-  placeholder: "Search for apps and commands...";
+  placeholder: "Search apps...";
   placeholder-color: rgba(255, 255, 255, 0.45);
   cursor-color: @primary;
   cursor-width: 2px;
-}
-textbox-ask {
-  content: "Ask AI";
-  expand: false;
-  vertical-align: 0.5;
-  text-color: @secondary;
-}
-textbox-tab {
-  content: "Tab";
-  expand: false;
-  vertical-align: 0.5;
-  horizontal-align: 0.5;
-  padding: 2px 7px;
-  border: 1px;
-  border-radius: 6px;
-  border-color: rgba(255, 255, 255, 0.35);
-  text-color: rgba(255, 255, 255, 0.75);
 }
 
 listview {
@@ -75,16 +55,15 @@ listview {
   fixed-height: true;
   scrollbar: false;
   cycle: false;
-  padding: 0 12px 8px 12px;
+  padding: 8px 12px 12px 12px;
 }
 
-/* a row: icon, title, "Application" on the right */
+/* a row: icon, name */
 element {
-  children: [ element-icon, element-text, textbox-kind ];
+  children: [ element-icon, element-text ];
   padding: 16px 11px 16px 13px;
   spacing: 16px;
   border-radius: 10px;
-  text-color: @secondary;    /* the "Application" label inherits this */
 }
 element selected.normal {
   background-color: rgba(255, 255, 255, 0.10);
@@ -97,53 +76,4 @@ element-text {
   vertical-align: 0.5;
   text-color: @primary;
   highlight: none;
-}
-textbox-kind {
-  content: "Application";
-  expand: false;
-  vertical-align: 0.5;
-  text-color: inherit;
-}
-
-/* section headers ("Favorites", ...): unselectable rows marked urgent by the script */
-element normal.urgent, element alternate.urgent {
-  padding: 26px 11px 6px 13px;   /* rofi keeps the icon slot, so titles line up with app names */
-  text-color: transparent;   /* hides the "Application" label */
-}
-
-/* bottom bar: primary action and its key */
-footer {
-  orientation: horizontal;
-  expand: false;
-  children: [ icon-logo, footer-gap, textbox-action, textbox-enter ];
-  padding: 14px 19px 14px 22px;
-  spacing: 15px;
-  background-color: rgba(0, 0, 0, 0.15);
-  border: 1px 0 0 0;
-  border-color: @hairline;
-  border-radius: 0 0 17px 17px;
-}
-icon-logo {
-  filename: "system-search";
-  size: 25px;
-  expand: false;
-  vertical-align: 0.5;
-}
-footer-gap {
-  expand: true;
-}
-textbox-action {
-  content: "Open Application";
-  expand: false;
-  vertical-align: 0.5;
-}
-textbox-enter {
-  content: "↵";
-  expand: false;
-  vertical-align: 0.5;
-  horizontal-align: 0.5;
-  padding: 3px 9px;
-  border-radius: 6px;
-  background-color: @key;
-  text-color: rgba(255, 255, 255, 0.75);
 }

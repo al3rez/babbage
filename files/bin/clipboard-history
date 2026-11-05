@@ -1,0 +1,640 @@
+#!/usr/bin/env python3
+"""Clipboard History on Super+Shift+V: the app launcher's window (same frame, search bar and rows
+as files/rofi/launcher.rasi) listing what you copied, with a preview of the selected entry on
+the right (the image itself, the text, or the color).
+
+One long-running process (a GtkApplication; `--daemon` from the systemd unit) records every
+clipboard change: text, links, colors and images. Running `clipboard-history` again (the
+hotkey) asks that process over D-Bus to open its window, so it appears instantly. It also owns
+what it hands out, so a pasted entry stays available.
+  Enter         paste into the app that was focused
+  Ctrl+Enter    copy only
+  Shift+Delete  remove the entry
+  Esc           close (so does clicking elsewhere)
+
+Secrets are skipped: copies offering x-kde-passwordManagerHint (KeePassXC and others) and
+copies from password-manager apps. History lives in $XDG_DATA_HOME/clipboard-history (0700),
+keeps 1000 entries / 90 days.
+"""
+import datetime
+import hashlib
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
+from Xlib import X, XK, display as xdisplay  # noqa: E402
+from Xlib.ext import xtest  # noqa: E402
+
+I3MSG = os.environ.get("I3MSG", "i3-msg")
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "clipboard-history")
+IMAGES = os.path.join(DATA, "images")
+MAX_ENTRIES, MAX_AGE_DAYS, MAX_TEXT = 1000, 90, 1_000_000
+SECRET_TARGETS = {"x-kde-passwordManagerHint"}
+SECRET_APPS = ("keepassxc", "1password", "bitwarden", "seahorse", "proton pass", "enpass")
+TERMINALS = ("ghostty", "kitty", "alacritty", "xterm", "urxvt", "terminator", "gnome-terminal",
+             "xfce4-terminal", "wezterm", "foot", "konsole", "tilix", "st-256color")
+KIND_ICONS = {"text": "text-x-generic", "link": "text-html"}
+KIND_NAMES = {"text": "Text", "link": "Link", "color": "Color", "image": "Image"}
+LINK_RE = re.compile(r"^(https?|ftp|file|slack|tg)://\S+$|^mailto:\S+$", re.I)
+COLOR_RE = re.compile(r"^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$", re.I)
+DEBUG = bool(os.environ.get("CLIPBOARD_HISTORY_DEBUG"))
+
+# The launcher's look, read from its rofi theme at startup (load_theme; LAUNCHER_THEME is
+# files/rofi/launcher.rasi). These are only fallbacks, in the theme's own pixels (144 DPI = 1.5x).
+LAUNCHER_THEME = os.environ.get("LAUNCHER_THEME")
+LAUNCHER = dict(width=1124, background="rgba(30, 30, 33, 0.70)", border=1, border_color="rgba(255, 255, 255, 0.13)",
+                radius=18, search_pad=(25, 24, 25, 26), hairline="rgba(255, 255, 255, 0.08)", font="Inter 10",
+                entry_font="Inter 12", placeholder_color="rgba(255, 255, 255, 0.45)",
+                caret="rgba(255, 255, 255, 0.92)", text="rgba(255, 255, 255, 0.92)", lines=9,
+                list_pad=(8, 12, 12, 12), row_pad=(16, 11, 16, 13), row_spacing=16, row_radius=10,
+                selected="rgba(255, 255, 255, 0.10)", icon=28)
+
+
+def log(*a):
+    if DEBUG:
+        print("[clipboard-history]", *a, file=sys.stderr, flush=True)
+
+
+def clean(s):
+    return " ".join((s or "").replace("\0", "").split())
+
+
+def when(ts):
+    t = datetime.datetime.fromtimestamp(ts)
+    today = datetime.date.today()
+    day = ("Today" if t.date() == today else "Yesterday" if t.date() == today - datetime.timedelta(days=1)
+           else t.strftime("%b %-d") if t.year == today.year else t.strftime("%b %-d, %Y"))
+    return f"{day} at {t.strftime('%H:%M')}"
+
+
+# ---- storage --------------------------------------------------------------------------------
+class Store:
+    def __init__(self):
+        for d in (DATA, IMAGES):
+            os.makedirs(d, mode=0o700, exist_ok=True)
+            os.chmod(d, 0o700)
+        path = os.path.join(DATA, "history.db")
+        self.db = sqlite3.connect(path)
+        os.chmod(path, 0o600)
+        self.db.execute("""create table if not exists entries (
+            id integer primary key, hash text unique, kind text, text text, image text,
+            width integer, height integer, app text, app_icon text,
+            first_copied real, last_copied real, times integer default 1, pinned integer default 0)""")
+        self.db.commit()
+
+    def latest_hash(self):
+        row = self.db.execute("select hash from entries order by last_copied desc limit 1").fetchone()
+        return row[0] if row else None
+
+    def add(self, h, kind, text, image, w, hgt, app):
+        now = time.time()
+        if self.db.execute("select 1 from entries where hash=?", (h,)).fetchone():
+            self.db.execute("update entries set last_copied=?, times=times+1, app=coalesce(?, app) where hash=?",
+                            (now, app, h))
+        else:
+            self.db.execute("insert into entries (hash, kind, text, image, width, height, app, "
+                            "first_copied, last_copied) values (?,?,?,?,?,?,?,?,?)",
+                            (h, kind, text, image, w, hgt, app, now, now))
+        self.prune()
+        self.db.commit()
+
+    def bump(self, h):
+        self.db.execute("update entries set last_copied=? where hash=?", (time.time(), h))
+        self.db.commit()
+
+    def prune(self):
+        cutoff = time.time() - MAX_AGE_DAYS * 86400
+        old = self.db.execute("select id from entries where pinned=0 and (last_copied<? or id not in "
+                              "(select id from entries where pinned=0 order by last_copied desc limit ?))",
+                              (cutoff, MAX_ENTRIES)).fetchall()
+        for (eid,) in old:
+            self.delete(eid, commit=False)
+
+    def delete(self, eid, commit=True):
+        row = self.db.execute("select image from entries where id=?", (eid,)).fetchone()
+        self.db.execute("delete from entries where id=?", (eid,))
+        if row and row[0]:
+            try:
+                os.remove(os.path.join(IMAGES, row[0]))
+            except OSError:
+                pass
+        if commit:
+            self.db.commit()
+
+    def entries(self):
+        cols = ("id", "hash", "kind", "text", "image", "width", "height", "app", "last_copied")
+        return [dict(zip(cols, r)) for r in
+                self.db.execute(f"select {', '.join(cols)} from entries order by pinned desc, last_copied desc")]
+
+
+# ---- X helpers: which app is focused, and typing the paste shortcut ---------------------------
+class XHelper:
+    def __init__(self):
+        self.d = xdisplay.Display()
+        self.root = self.d.screen().root
+        self.active = self.d.intern_atom("_NET_ACTIVE_WINDOW")
+
+    def active_window(self):
+        try:
+            p = self.root.get_full_property(self.active, X.AnyPropertyType)
+            wid = p.value[0] if p and p.value else 0
+            if not wid:
+                return 0, "", ""
+            cls = self.d.create_resource_object("window", wid).get_wm_class() or ("", "")
+            return wid, cls[0] or "", cls[1] or ""
+        except Exception:
+            return 0, "", ""
+
+    def paste(self, terminal):
+        keys = ["Control_L", "Shift_L", "v"] if terminal else ["Control_L", "v"]
+        codes = [self.d.keysym_to_keycode(XK.string_to_keysym(k)) for k in keys]
+        for c in codes:
+            xtest.fake_input(self.d, X.KeyPress, c)
+        for c in reversed(codes):
+            xtest.fake_input(self.d, X.KeyRelease, c)
+        self.d.sync()
+
+
+def app_index():
+    """lowercased WM_CLASS / desktop id -> app name, from the installed apps."""
+    idx = {}
+    for info in Gio.AppInfo.get_all():
+        if not hasattr(info, "get_startup_wm_class"):    # desktop entries only
+            continue
+        if info.get_startup_wm_class():
+            idx.setdefault(info.get_startup_wm_class().lower(), info.get_name())
+        idx.setdefault((info.get_id() or "").removesuffix(".desktop").lower(), info.get_name())
+    return idx
+
+
+def load_theme(path):
+    """The launcher's rofi theme (files/rofi/launcher.rasi) as plain values, so this window has
+    exactly its look: one source of truth for both. Missing values keep LAUNCHER's defaults."""
+    theme = dict(LAUNCHER)
+    try:
+        src = re.sub(r"/\*.*?\*/", "", open(path).read(), flags=re.S)
+    except (OSError, TypeError):
+        return theme
+    blocks = {}
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", src):
+        decls = (d.partition(":") for d in body.split(";") if ":" in d)
+        blocks[sel.strip()] = {k.strip(): v.strip().strip('"') for k, _, v in decls}
+    var = blocks.get("*", {})
+    def get(sel, key):
+        v = blocks.get(sel, {}).get(key)
+        while v and v.startswith("@"):
+            v = var.get(v[1:])
+        return v
+    def px(v):
+        return [round(float(x.removesuffix("px"))) for x in v.split()] if v else None
+    def box(v):
+        p = px(v)
+        return None if not p else tuple({1: p * 4, 2: p + p, 3: [p[0], p[1], p[2], p[1]]}.get(len(p), p))
+    found = dict(
+        width=(px(get("window", "width")) or [None])[0],
+        background=get("window", "background-color"),
+        border=(px(get("window", "border")) or [None])[0],
+        border_color=get("window", "border-color"),
+        radius=(px(get("window", "border-radius")) or [None])[0],
+        search_pad=box(get("inputbar", "padding")),
+        hairline=get("inputbar", "border-color"),
+        font=var.get("font"),
+        entry_font=get("entry", "font"),
+        placeholder_color=get("entry", "placeholder-color"),
+        caret=get("entry", "cursor-color"),
+        text=get("element-text", "text-color") or get("*", "text-color"),
+        lines=int(get("listview", "lines")) if get("listview", "lines") else None,
+        list_pad=box(get("listview", "padding")),
+        row_pad=box(get("element", "padding")),
+        row_spacing=(px(get("element", "spacing")) or [None])[0],
+        row_radius=(px(get("element", "border-radius")) or [None])[0],
+        selected=get("element selected.normal", "background-color"),
+        icon=(px(get("element-icon", "size")) or [None])[0],
+    )
+    theme.update({k: v for k, v in found.items() if v is not None})
+    return theme
+
+
+def font_css(spec):
+    """rofi "Inter 12" -> CSS font-family/font-size."""
+    family, _, size = spec.rpartition(" ")
+    return f'font-family: "{family}"; font-size: {size}pt;'
+
+
+def css(T, L):
+    t, r, b, l = (L(v) for v in T["search_pad"])
+    lt, lr, lb, ll = (L(v) for v in T["list_pad"])
+    rt, rr, rb, rl = (L(v) for v in T["row_pad"])
+    return f"""
+    window.clipboard-history {{ background-color: {T["background"]}; border: {T["border"]}px solid {T["border_color"]};
+        border-radius: {L(T["radius"])}px; }}
+    window.clipboard-history * {{ color: {T["text"]}; {font_css(T["font"])} }}
+    .ch-search-bar {{ padding: {t}px {r}px {b}px {l}px; border-bottom: 1px solid {T["hairline"]}; }}
+    entry.ch-search, entry.ch-search:focus, .ch-placeholder {{ {font_css(T["entry_font"])} }}
+    entry.ch-search, entry.ch-search:focus, entry.ch-search:focus-within, entry.ch-search:focus-visible {{
+        background: none; border: none; box-shadow: none; outline: none; outline-width: 0;
+        padding: 0; margin: 0; min-height: 0; caret-color: {T["caret"]}; }}
+    .ch-placeholder, .ch-meta, .ch-empty {{ color: {T["placeholder_color"]}; }}
+    scrolledwindow, viewport, list, list row {{ background: none; border: none; box-shadow: none; outline: none; }}
+    scrollbar, scrollbar trough, scrollbar slider {{ background: none; border: none; min-width: 0; }}
+    .ch-list {{ padding: {lt}px {lr}px {lb}px {ll}px; }}
+    .ch-list row {{ padding: {rt}px {rr}px {rb}px {rl}px; border-radius: {L(T["row_radius"])}px; }}
+    .ch-list row:selected {{ background-color: {T["selected"]}; }}
+    .ch-divider {{ background-color: {T["hairline"]}; min-width: 1px; }}
+    .ch-preview {{ padding: {lt + rt}px {lr + rl}px; }}
+    .ch-preview-text {{ font-family: "Berkeley Mono", "TX-02", monospace; font-size: 9.5pt; }}
+    """
+
+
+# ---- the window -----------------------------------------------------------------------------
+class HistoryWindow(Gtk.Window):
+    def __init__(self, app):
+        super().__init__(application=app)
+        self.app = app
+        L = app.L
+        self.set_decorated(False)
+        self.set_type_hint(Gdk.WindowTypeHint.UTILITY)       # not "normal": picom would dim/gloss it
+        self.set_skip_taskbar_hint(True)
+        self.set_keep_above(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual:
+            self.set_visual(visual)
+        self.get_style_context().add_class("clipboard-history")
+        icon, (rt, _rr, rb, _rl) = L(LAUNCHER["icon"]), LAUNCHER["row_pad"]
+        self.row_h = icon + L(rt) + L(rb)
+        self.W = L(LAUNCHER["width"])
+        self.set_resizable(False)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root)
+
+        # search bar, with its own placeholder: GTK 3 hides an entry's placeholder while it has focus
+        bar = Gtk.Box()
+        bar.get_style_context().add_class("ch-search-bar")
+        overlay = Gtk.Overlay()
+        self.search = Gtk.Entry()
+        self.search.get_style_context().add_class("ch-search")
+        self.search.set_hexpand(True)
+        self.search.set_has_frame(False)
+        self.placeholder = Gtk.Label(label="Search clipboard...", xalign=0)
+        self.placeholder.get_style_context().add_class("ch-placeholder")
+        overlay.add(self.search)
+        overlay.add_overlay(self.placeholder)
+        overlay.set_overlay_pass_through(self.placeholder, True)
+        bar.pack_start(overlay, True, True, 0)
+        root.pack_start(bar, False, False, 0)
+        self.search.connect("changed", self.on_search)
+
+        body = Gtk.Box()
+        root.pack_start(body, True, True, 0)
+        self.scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.scroll.set_size_request(round(self.W * 0.52), -1)
+        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE)
+        self.listbox.get_style_context().add_class("ch-list")
+        self.listbox.set_activate_on_single_click(False)
+        self.listbox.connect("row-selected", lambda *_: self.show_selected())
+        self.listbox.connect("row-activated", lambda *_: self.act(paste=True))
+        self.scroll.add(self.listbox)
+        self.listbox.set_focus_vadjustment(self.scroll.get_vadjustment())
+        body.pack_start(self.scroll, False, False, 0)
+        divider = Gtk.Box()
+        divider.get_style_context().add_class("ch-divider")
+        body.pack_start(divider, False, False, 0)
+
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        right.get_style_context().add_class("ch-preview")
+        self.preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.preview.set_vexpand(True)
+        right.pack_start(self.preview, True, True, 0)
+        self.meta1 = Gtk.Label(xalign=0)
+        self.meta2 = Gtk.Label(xalign=0)
+        for m in (self.meta1, self.meta2):
+            m.get_style_context().add_class("ch-meta")
+            m.set_ellipsize(Pango.EllipsizeMode.END)
+            right.pack_start(m, False, False, 0)
+        self.meta1.set_margin_top(L(10))
+        body.pack_start(right, True, True, 0)
+
+        lt, _lr, lb, _ll = LAUNCHER["list_pad"]
+        self.list_h = LAUNCHER["lines"] * self.row_h + L(lt) + L(lb)
+        # rofi's listview: always exactly `lines` rows tall (fixed-height); the window fits around it
+        self.scroll.set_min_content_height(self.list_h)
+        self.scroll.set_max_content_height(self.list_h)
+        self.set_size_request(self.W, -1)
+        self.connect("key-press-event", self.on_key)
+        self.connect("focus-out-event", lambda *_: self.close_soon())
+        self.connect("delete-event", lambda *_: self.hide() or True)
+        self.entries = []
+        self.visible_rows = []
+        self.target = (0, "", "")
+
+    # -- open / close
+    def open(self):
+        if self.get_visible():
+            self.hide()
+            return
+        self.target = self.app.x.active_window()
+        self.search.set_text("")
+        self.reload()
+        display = Gdk.Display.get_default()
+        _s, px, py = display.get_default_seat().get_pointer().get_position()
+        mon = display.get_monitor_at_point(px, py).get_geometry()
+        x, y = mon.x + (mon.width - self.W) // 2, mon.y + round(mon.height * 0.21)   # rofi: north, 21%
+        self.move(x, y)
+        self.show_all()
+        self.move(x, y)
+        self.present_with_time(Gtk.get_current_event_time() or Gdk.CURRENT_TIME)
+        self.search.grab_focus()
+
+    def close_soon(self):
+        GLib.timeout_add(60, lambda: (self.hide() if self.get_visible() and not self.is_active() else None) and False)
+
+    # -- list
+    def reload(self):
+        self.entries = self.app.store.entries()
+        for child in self.listbox.get_children():
+            self.listbox.remove(child)
+        for e in self.entries:
+            self.listbox.add(self.make_row(e))
+        self.listbox.show_all()
+        self.refilter()
+
+    def make_row(self, e):
+        L = self.app.L
+        row = Gtk.ListBoxRow()
+        row.entry = e
+        box = Gtk.Box(spacing=L(LAUNCHER["row_spacing"]))
+        box.pack_start(self.icon(e, L(LAUNCHER["icon"])), False, False, 0)
+        title = Gtk.Label(label=self.title(e), xalign=0)
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        box.pack_start(title, True, True, 0)
+        row.add(box)
+        return row
+
+    def icon(self, e, size):
+        if e["kind"] == "image":
+            pb = self.app.picture(e, size, size)
+            if pb:
+                return Gtk.Image.new_from_pixbuf(pb)
+        if e["kind"] == "color":
+            rgba = Gdk.RGBA()
+            rgba.parse(e["text"])
+            sw = Gtk.DrawingArea()
+            sw.set_size_request(size, size)
+            sw.set_valign(Gtk.Align.CENTER)
+            sw.connect("draw", lambda w, cr: (cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha),
+                                              cr.arc(size / 2, size / 2, size / 2 - 1, 0, 6.2832), cr.fill()))
+            return sw
+        img = Gtk.Image.new_from_icon_name(KIND_ICONS.get(e["kind"], "text-x-generic"), Gtk.IconSize.DIALOG)
+        img.set_pixel_size(size)
+        return img
+
+    @staticmethod
+    def title(e):
+        if e["kind"] == "image":
+            return f"Image ({e['width']}×{e['height']})"
+        return clean(e["text"])[:200] or "(empty)"
+
+    def on_search(self, *_):
+        self.placeholder.set_visible(not self.search.get_text())
+        self.refilter()
+
+    def refilter(self):
+        words = self.search.get_text().lower().split()
+        def visible(row):
+            e = row.entry
+            hay = f"{self.title(e)} {e['text'] or ''} {e['app'] or ''}".lower()
+            return all(w in hay for w in words)
+        self.listbox.set_filter_func(visible)
+        self.listbox.invalidate_filter()
+        self.visible_rows = [r for r in self.listbox.get_children() if visible(r)]
+        self.listbox.select_row(self.visible_rows[0] if self.visible_rows else None)
+        self.scroll.get_vadjustment().set_value(0)
+        self.show_selected()
+
+    def selected(self):
+        row = self.listbox.get_selected_row()
+        return row.entry if row else None
+
+    def move_selection(self, step):
+        if not self.visible_rows:
+            return
+        cur = self.listbox.get_selected_row()
+        i = self.visible_rows.index(cur) if cur in self.visible_rows else -1
+        nxt = self.visible_rows[max(0, min(len(self.visible_rows) - 1, i + step))]
+        self.listbox.select_row(nxt)
+        nxt.grab_focus()
+        self.search.grab_focus_without_selecting()
+
+    # -- preview
+    def show_selected(self):
+        L = self.app.L
+        for c in self.preview.get_children():
+            self.preview.remove(c)
+        e = self.selected()
+        if not e:
+            empty = Gtk.Label(label="Nothing copied yet" if not self.entries else "No matches")
+            empty.get_style_context().add_class("ch-empty")
+            self.preview.pack_start(empty, True, True, 0)
+            self.meta1.set_text(""); self.meta2.set_text("")
+            self.preview.show_all()
+            return
+        pw = self.W - round(self.W * 0.52) - 1 - 2 * L(22)
+        ph = self.list_h - 2 * L(20) - L(60)
+        if e["kind"] == "image":
+            pb = self.app.picture(e, min(pw, e["width"] or pw), min(ph, e["height"] or ph))
+            widget = Gtk.Image.new_from_pixbuf(pb) if pb else Gtk.Label(label="(image missing)")
+            widget.set_valign(Gtk.Align.CENTER)
+            self.preview.pack_start(widget, True, True, 0)
+            info = f"Image · {e['width']}×{e['height']}"
+        elif e["kind"] == "color":
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=L(12), valign=Gtk.Align.CENTER)
+            sw = self.icon(e, L(96))
+            sw.set_halign(Gtk.Align.CENTER)
+            box.pack_start(sw, False, False, 0)
+            box.pack_start(Gtk.Label(label=e["text"]), False, False, 0)
+            self.preview.pack_start(box, True, True, 0)
+            info = "Color"
+        else:
+            text = e["text"] or ""
+            label = Gtk.Label(label=text[:5000], xalign=0, yalign=0, wrap=True)
+            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            label.set_max_width_chars(1)                     # wrap to the pane, not to the text
+            label.set_lines(18)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.get_style_context().add_class("ch-preview-text")
+            self.preview.pack_start(label, True, True, 0)
+            info = f"{KIND_NAMES[e['kind']]} · {len(text):,} characters"
+        self.meta1.set_text(info)
+        self.meta2.set_text(" · ".join(filter(None, [e["app"], when(e["last_copied"])])))
+        self.preview.show_all()
+
+    # -- actions
+    def on_key(self, _w, ev):
+        ctrl = ev.state & Gdk.ModifierType.CONTROL_MASK
+        shift = ev.state & Gdk.ModifierType.SHIFT_MASK
+        k = ev.keyval
+        if k == Gdk.KEY_Escape:
+            self.hide(); return True
+        steps = {Gdk.KEY_Down: 1, Gdk.KEY_Up: -1, Gdk.KEY_Page_Down: LAUNCHER["lines"],
+                 Gdk.KEY_Page_Up: -LAUNCHER["lines"]}
+        if k in steps:
+            self.move_selection(steps[k]); return True
+        if ctrl and k in (Gdk.KEY_n, Gdk.KEY_p):
+            self.move_selection(1 if k == Gdk.KEY_n else -1); return True
+        if k in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.act(paste=not ctrl); return True
+        if shift and k == Gdk.KEY_Delete:
+            e = self.selected()
+            if e:
+                idx = self.visible_rows.index(self.listbox.get_selected_row())
+                self.app.store.delete(e["id"])
+                self.reload()
+                if self.visible_rows:
+                    self.listbox.select_row(self.visible_rows[min(idx, len(self.visible_rows) - 1)])
+            return True
+        return False
+
+    def act(self, paste):
+        e = self.selected()
+        if not e:
+            return
+        self.app.set_clipboard(e)
+        self.hide()
+        wid, inst, cls = self.target
+        if paste and wid:
+            terminal = any(t in f"{inst} {cls}".lower() for t in TERMINALS)
+            log("paste into", hex(wid), inst, cls, "ctrl+shift+v" if terminal else "ctrl+v")
+            def do_paste():
+                subprocess.run([I3MSG, "-q", f"[id={wid}] focus"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                GLib.timeout_add(60, lambda: self.app.x.paste(terminal) and False)
+                return False
+            GLib.timeout_add(80, do_paste)
+
+
+# ---- the app: recorder + window -------------------------------------------------------------
+class ClipboardHistory(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.al3rez.ClipboardHistory",
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window = None
+        self.own_hash = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        dpi = Gtk.Settings.get_default().get_property("gtk-xft-dpi")
+        scale = (dpi / 1024 / 96) if dpi and dpi > 0 else 1.0
+        self.L = lambda v: round(v * scale / 1.5)            # launcher.rasi pixels are at 1.5x
+        provider = Gtk.CssProvider()
+        LAUNCHER.update(load_theme(LAUNCHER_THEME))
+        log("launcher theme:", LAUNCHER)
+        provider.load_from_data(css(LAUNCHER, self.L).encode())
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_USER + 1)
+        self.store = Store()
+        self.x = XHelper()
+        self.apps = app_index()
+        self.clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        self.clipboard.connect("owner-change", self.on_owner_change)
+        self.pending = None
+        self.window = HistoryWindow(self)
+        GLib.idle_add(self.record)          # whatever is on the clipboard right now
+        self.hold()                          # keep running without a window
+
+    def do_command_line(self, cmd):
+        if "--daemon" not in cmd.get_arguments():
+            try:
+                self.window.open()
+            except Exception:          # never leave the hotkey's process waiting on a reply
+                import traceback
+                traceback.print_exc()
+        return 0
+
+    def app_name(self, inst, cls):
+        for key in (cls.lower(), inst.lower()):
+            if key in self.apps:
+                return self.apps[key]
+        return cls or inst or None
+
+    # -- recording
+    def on_owner_change(self, *_):
+        if self.pending:
+            GLib.source_remove(self.pending)
+        self.pending = GLib.timeout_add(120, self.record)   # let the new owner settle
+
+    def record(self):
+        self.pending = None
+        ok, atoms = self.clipboard.wait_for_targets()
+        if not ok or not atoms:
+            return False
+        targets = {a.name() for a in atoms}
+        if targets & SECRET_TARGETS:
+            return False
+        _wid, inst, cls = self.x.active_window()
+        if any(s in f"{inst} {cls}".lower() for s in SECRET_APPS):
+            return False
+        app = self.app_name(inst, cls)
+        text_targets = targets & {"UTF8_STRING", "text/plain;charset=utf-8", "text/plain", "STRING", "TEXT"}
+        if any(t.startswith("image/") for t in targets) and not text_targets:
+            pb = self.clipboard.wait_for_image()
+            if not pb:
+                return False
+            h = hashlib.sha256(pb.get_pixels()).hexdigest()
+            if self.skip(h):
+                return False
+            name = f"{h[:24]}.png"
+            path = os.path.join(IMAGES, name)
+            if not os.path.exists(path):
+                pb.savev(path, "png", [], [])
+                os.chmod(path, 0o600)
+            self.store.add(h, "image", None, name, pb.get_width(), pb.get_height(), app)
+            return False
+        text = self.clipboard.wait_for_text()
+        if not text or not text.strip() or len(text) > MAX_TEXT:
+            return False
+        h = hashlib.sha256(text.encode()).hexdigest()
+        if self.skip(h):
+            return False
+        s = text.strip()
+        kind = "color" if COLOR_RE.match(s) else "link" if LINK_RE.match(s) else "text"
+        self.store.add(h, kind, text if kind == "text" else s, None, None, None, app)
+        return False
+
+    def skip(self, h):
+        """Not a new copy: XFCE's clipboard keeper re-owning the newest entry, or our own hand-out."""
+        if h == self.own_hash:
+            self.store.bump(h)
+            return True
+        return h == self.store.latest_hash()
+
+    def set_clipboard(self, e):
+        # no clipboard.store(): handing the content to xfsettingsd's clipboard keeper left the
+        # clipboard with no usable owner; this process stays running and serves it itself
+        self.own_hash = e["hash"]
+        if e["kind"] == "image":
+            self.clipboard.set_image(GdkPixbuf.Pixbuf.new_from_file(os.path.join(IMAGES, e["image"])))
+        else:
+            self.clipboard.set_text(e["text"], -1)
+        log("clipboard set to", e["kind"], (e["text"] or e["image"] or "")[:40])
+
+    def picture(self, e, w, h):
+        try:
+            return GdkPixbuf.Pixbuf.new_from_file_at_scale(os.path.join(IMAGES, e["image"]), w, h, True)
+        except (GLib.Error, TypeError):
+            return None
+
+
+if __name__ == "__main__":
+    GLib.set_prgname("clipboard-history")
+    # WM_CLASS "Clipboard-history" (i3 and picom rules match it); left alone, GTK derives the
+    # class from the script's path, which is a Nix store name
+    Gdk.set_program_class("Clipboard-history")
+    sys.exit(ClipboardHistory().run(sys.argv))

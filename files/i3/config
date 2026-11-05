@@ -24,6 +24,8 @@ for_window [window_role="pop-up"] floating enable
 for_window [class="WhatsApp"] floating disable
 for_window [window_type="dialog"] floating enable
 for_window [window_type="menu"] floating enable
+# Clipboard History (Super+Shift+V): a floating window that places itself where rofi would
+for_window [class="Clipboard-history"] floating enable, border none
 no_focus [class="Xfce4-notifyd"]
 
 # --- startup (layout before wallpaper so the LG never flashes ASUS-only geometry)
@@ -32,6 +34,9 @@ exec --no-startup-id @picom@ --config "@picomconf@"
 exec --no-startup-id @feh@ --no-fehbg --bg-fill "@wallpaper@"
 # workspace numbers in the xfce4-panel bars (genmon slots); exits if already running
 exec_always --no-startup-id @i3wsbar@
+# background services; XFCE never starts graphical-session.target, so start them here too
+exec --no-startup-id systemctl --user start clipboard-history.service
+exec --no-startup-id systemctl --user start monitor-layout-guard.service
 
 # --- launch
 bindsym $mod+Return exec @ghostty@
@@ -40,6 +45,8 @@ bindsym $mod+d exec xfce4-appfinder
 bindsym $mod+Shift+f exec thunar
 # region screenshot like macOS ⌘⇧4: saved to ~/Pictures/Screenshots and copied to the clipboard
 bindsym Ctrl+Shift+4 exec --no-startup-id @screenshotregion@
+# clipboard history like Raycast (⌘⇧V there)
+bindsym $mod+Shift+v exec --no-startup-id @clipboard@
 bindsym $mod+q kill
 
 # --- focus / move (arrows and vim keys)
