@@ -7,7 +7,7 @@ let
   #   "gloss"    glass glint lit from the top-left (files/picom/gloss.frag)
   #   "ring"     macOS background window: 1px dark outline + 1px light inner rim (edge-ring.frag)
   #   "hairline" macOS key window: 1px light rim, brighter on top (edge-hairline.frag)
-  edge = "hairline";
+  edge = "ring";
   edgeShader = {
     gloss = ../files/picom/gloss.frag;
     ring = ../files/picom/edge-ring.frag;
