@@ -36,7 +36,7 @@ sudo timedatectl set-timezone Asia/Bangkok
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \
-  blueman network-manager-gnome firefox-esr tailscale
+  blueman network-manager-gnome tailscale
 if [ "$profile" = "al3rez" ]; then
   sudo apt-get install -y nvidia-settings
   # driver-level monitor layout + soft DPMS (monitors stay connected while asleep);
@@ -63,6 +63,10 @@ fi
 
 # 3. Everything else: i3, picom, dunst, Ghostty, Telegram, fonts, icons, wallpaper, xfconf
 nix run home-manager/master -- switch -b backup --flake "$here#$profile"
+# OpenRGB's udev rules (from the profile it just installed): RAM SMBus + RGB controllers for
+# the logged-in user, so the rgb-off service can turn the lighting off (modules/rgb.nix)
+sudo install -Dm644 "$HOME/.nix-profile/lib/udev/rules.d/60-openrgb.rules" /etc/udev/rules.d/60-openrgb.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
 
 echo
 echo "Done. Log out and back in to start the i3 + XFCE session."

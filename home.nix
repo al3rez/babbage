@@ -33,6 +33,7 @@ in
     ./modules/monitors.nix
     ./modules/power.nix
     ./modules/network.nix
+    ./modules/rgb.nix
   ];
 
   home.username = "al3rez";
