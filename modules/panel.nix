@@ -243,13 +243,6 @@ in
   xdg.dataFile."applications/steam.desktop".text = steamDesktop;
 
   xdg.configFile = {
-    "autostart/menubar-popovers.desktop".text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=Menu bar popovers
-      Exec=${menubarPopovers}
-      X-GNOME-Autostart-enabled=true
-    '';
     # nm-applet as a StatusNotifierItem (its menu over dbusmenu), so it gets a popover too
     "autostart/nm-applet.desktop".text = ''
       [Desktop Entry]
@@ -264,6 +257,27 @@ in
   } // lib.optionalAttrs dual {
     "xfce4/panel/launcher-61/spotlight.desktop".source = ../files/panel/launcher-25/spotlight.desktop;
     "xfce4/panel/launcher-62/control-center.desktop".source = ../files/panel/launcher-26/control-center.desktop;
+  };
+
+  # The tray popovers draw the bar's Wi-Fi / Bluetooth / Telegram / Tailscale icons (the apps' own
+  # tray icons are hidden), so if the helper ever dies those icons vanish. Run it as a service that
+  # always comes back. XFCE never starts graphical-session.target, so it hangs off default.target
+  # and retries until X is up; i3 also starts it at login. Its own lock keeps it to one instance.
+  systemd.user.services.menubar-popovers = {
+    Unit = {
+      Description = "Menu bar tray popovers (Wi-Fi, Bluetooth, Telegram, Tailscale)";
+      StartLimitIntervalSec = 0;
+    };
+    Service = {
+      Environment = [
+        "DISPLAY=:0"
+        "XDG_DATA_DIRS=%h/.nix-profile/share:/usr/local/share:/usr/share"
+      ];
+      ExecStart = "${menubarPopovers}";
+      Restart = "always";
+      RestartSec = "2";
+    };
+    Install.WantedBy = [ "default.target" ];
   };
 
   # pinned launchers as real files (see pinnedFarm); the plugin notices changed files itself

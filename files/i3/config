@@ -37,6 +37,7 @@ exec_always --no-startup-id @i3wsbar@
 # background services; XFCE never starts graphical-session.target, so start them here too
 exec --no-startup-id systemctl --user start clipboard-history.service
 exec --no-startup-id systemctl --user start monitor-layout-guard.service
+exec --no-startup-id systemctl --user start menubar-popovers.service
 
 # --- launch
 bindsym $mod+Return exec @ghostty@
