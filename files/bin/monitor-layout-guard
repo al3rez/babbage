@@ -1,28 +1,35 @@
 #!@python@
-"""Put the LG (DP-2) + ASUS (DP-4) NVIDIA layout back if the driver ever changes it.
+"""Put the LG (DP-2) + ASUS (DP-4) NVIDIA layout back if the driver ever changes it, and keep
+each xfce4-panel bar on its own monitor.
 
-Event-driven only: it wakes on RandR events and reads the X server's cached state. When the
-layout is right it does nothing at all. It never touches the panel or the bars, never polls
-the driver, and never re-applies a layout while the monitors are asleep or nobody is at the
-keyboard (a MetaMode sent to sleeping DisplayPort monitors hangs X for ~45s).
-Logs to `journalctl -t monitor-layout-guard`.
+RandR events trigger layout checks. A cheap X DPMS/idle check also detects user return
+without a RandR event; all layout reads use cached state, never a driver probe.
+Never applies a MetaMode while asleep, idle, or missing an expected output.
+
+Bars: i3 docks a bar on whichever monitor the window is on when it maps, so after the panel
+restarts the ASUS bar can land under the LG one. The bar's _NET_WM_STRUT_PARTIAL still says
+which monitor the panel meant it for; one ConfigureRequest to that spot makes i3 move the dock
+there. Checked on the same 5s tick (window tree only); the panel itself is never restarted.
+Logs and child-process errors go to the user service journal.
 """
 import os
 import select
+import signal
 import subprocess
 import syslog
 import time
 
-from Xlib import display
+from Xlib import X, display
 from Xlib.ext import dpms, randr
 
 WANT = {"DP-2": (0, 0, 3840, 2160), "DP-4": (3840, 960, 1920, 1200)}
 SETTLE = 3.0            # quiet seconds after the last RandR event before checking
-IDLE_RECHECK = 5.0      # while monitors sleep / user away, look again this often
+IDLE_RECHECK = 5.0      # cached X DPMS/idle state only, not DisplayPort probing
 ACTIVE_WITHIN_MS = 60_000
 CMD_TIMEOUT = 30
 RETRY_MIN, RETRY_MAX = 10.0, 300.0
 APPLY = os.environ["APPLY_DESK_LAYOUT"]
+BAR_HEIGHT = 36
 
 syslog.openlog("monitor-layout-guard", 0, syslog.LOG_USER)
 
@@ -59,19 +66,74 @@ def user_present(d):
     return d.screen().root.screensaver_query_info().idle < ACTIVE_WITHIN_MS
 
 
+def apply_layout():
+    # Kill the entire shell/driver-client group on timeout, not just its shell.
+    # stderr is inherited so NVIDIA failures remain visible in the journal.
+    with subprocess.Popen([APPLY], start_new_session=True) as proc:
+        try:
+            code = proc.wait(timeout=CMD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            log(f"apply-desk-layout timed out after {CMD_TIMEOUT}s; killed process group")
+            return False
+    if code:
+        log(f"apply-desk-layout exited with status {code}")
+    return code == 0
+
+
 def check(d):
     """Seconds until the next check, or None when nothing is pending."""
-    if not WANT.keys() <= connected(d) or layout_ok(d):
-        return None
     if not user_present(d):
         return IDLE_RECHECK
+    missing = WANT.keys() - connected(d)
+    if missing:
+        log(f"waiting for outputs: {', '.join(sorted(missing))}")
+        return RETRY_MIN
+    if layout_ok(d):
+        return None
     log("layout differs from the expected one; re-applying")
-    try:
-        subprocess.run([APPLY], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=CMD_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        log(f"apply-desk-layout timed out after {CMD_TIMEOUT}s")
+    if not apply_layout():
+        return RETRY_MIN
     return None if layout_ok(d) else RETRY_MIN
+
+
+def panel_bars(d):
+    """Shown 36px xfce4-panel windows: (window, x, y, strut or None)."""
+    bars, strut_atom, root = [], d.intern_atom("_NET_WM_STRUT_PARTIAL"), d.screen().root
+    def walk(w):
+        try:
+            cls = w.get_wm_class()
+            if cls and cls[0] == "xfce4-panel":
+                g = w.get_geometry()
+                if g.height == BAR_HEIGHT and w.get_attributes().map_state == X.IsViewable:
+                    t = w.translate_coords(root, 0, 0)
+                    p = w.get_full_property(strut_atom, X.AnyPropertyType)
+                    bars.append((w, -t.x, -t.y, list(p.value) if p and len(p.value) == 12 else None))
+            for c in w.query_tree().children:
+                walk(c)
+        except Exception:
+            pass
+    walk(root)
+    return bars
+
+
+def meant_for(strut):
+    """(x, y) of the monitor whose top edge the bar's strut reserves space below."""
+    if not strut:
+        return None
+    top, mid = strut[2], (strut[8] + strut[9]) // 2
+    hits = [(mx, my) for mx, my, mw, _ in WANT.values() if my + BAR_HEIGHT == top and mx <= mid < mx + mw]
+    return hits[0] if len(hits) == 1 else None
+
+
+def reseat_bars(d):
+    for w, x, y, strut in panel_bars(d):
+        target = meant_for(strut)
+        if target and (x, y) != target:
+            log(f"menu bar at {x},{y} belongs at {target[0]},{target[1]}; moving it back")
+            w.configure(x=target[0], y=target[1])
+    d.sync()
 
 
 def main():
@@ -83,16 +145,30 @@ def main():
     fd = d.fileno()
     due = time.monotonic() + SETTLE      # one check after login
     retry = RETRY_MIN
+    present = False
     while True:
-        timeout = None if due is None else max(due - time.monotonic(), 0.0)
-        r, _, _ = select.select([fd], [], [], timeout)
+        timeout = IDLE_RECHECK if due is None else min(IDLE_RECHECK, max(due - time.monotonic(), 0.0))
+        # Xlib can already have queued events after a synchronous query.
+        r = d.pending_events()
+        if not r:
+            r, _, _ = select.select([fd], [], [], timeout)
+        now = time.monotonic()
         if r:
             while d.pending_events():
                 d.next_event()
-            due = time.monotonic() + SETTLE
+            due = now + SETTLE
             retry = RETRY_MIN
-            continue
         try:
+            active = user_present(d)
+            if active and not present:
+                log("user active; checking layout after wake/idle")
+                due = now + SETTLE
+                retry = RETRY_MIN
+            present = active
+            if due is None and layout_ok(d):
+                reseat_bars(d)            # window tree only; safe on every tick
+            if due is None or now < due:
+                continue
             wait = check(d)
         except Exception as e:
             log(f"check failed ({e!r})")
@@ -102,7 +178,7 @@ def main():
         else:
             if wait == RETRY_MIN:
                 wait, retry = retry, min(retry * 2, RETRY_MAX)
-                log(f"layout still wrong; retrying in {int(wait)}s")
+                log(f"layout pending; retrying in {int(wait)}s")
             due = time.monotonic() + wait
 
 

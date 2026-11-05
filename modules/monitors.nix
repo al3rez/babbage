@@ -19,11 +19,40 @@ in
   config = lib.mkIf cfg.nvidia {
     home.packages = [ applyLayout ];
 
+    # xfsettingsd still applies Default at login even with automatic profiles disabled.
+    # Keep that profile consistent; let the guard own hotplug/wake correction.
+    xfconf.settings.displays = {
+      AutoEnableProfiles = 0;
+      Notify = 0;
+      "Default/DP-2" = "LG Electronics 32\"";
+      "Default/DP-2/Active" = true;
+      "Default/DP-2/Primary" = true;
+      "Default/DP-2/Resolution" = "3840x2160";
+      "Default/DP-2/RefreshRate" = 240.084397;
+      "Default/DP-2/Position/X" = 0;
+      "Default/DP-2/Position/Y" = 0;
+      "Default/DP-2/Rotation" = 0;
+      "Default/DP-2/Reflection" = "0";
+      "Default/DP-2/Scale" = 1.0;
+      "Default/DP-4" = "ASUSTek COMPUTER INC 16\"";
+      "Default/DP-4/Active" = true;
+      "Default/DP-4/Primary" = false;
+      "Default/DP-4/Resolution" = "1920x1200";
+      "Default/DP-4/RefreshRate" = 74.94;
+      "Default/DP-4/Position/X" = 3840;
+      "Default/DP-4/Position/Y" = 960;
+      "Default/DP-4/Rotation" = 0;
+      "Default/DP-4/Reflection" = "0";
+      "Default/DP-4/Scale" = 1.0;
+    };
+
+    # XFCE never activates graphical-session.target, so the guard hangs off default.target (the
+    # user manager, started at login) and simply retries until the X display is up. No start
+    # limit: the retries before X exists must not leave it failed. i3 also starts it at login.
     systemd.user.services.monitor-layout-guard = {
       Unit = {
         Description = "LG (DP-2) + ASUS (DP-4) NVIDIA layout guard";
-        After = [ "graphical-session.target" ];
-        PartOf = [ "graphical-session.target" ];
+        StartLimitIntervalSec = 0;
       };
       Service = {
         Environment = [
@@ -36,7 +65,7 @@ in
         Restart = "always";
         RestartSec = "2";
       };
-      Install.WantedBy = [ "graphical-session.target" ];
+      Install.WantedBy = [ "default.target" ];
     };
 
     xdg.configFile."autostart/monitors.desktop".text = ''
