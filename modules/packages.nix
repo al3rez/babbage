@@ -4,6 +4,29 @@ let
   steam = pkgs.writeShellScriptBin "steam" ''
     exec ${pkgs.flatpak}/bin/flatpak run com.valvesoftware.Steam "$@"
   '';
+  # DeepSeek Harness (github.com/deepseek-ai/deepseek-harness), developer preview: runs the
+  # pinned npm release; npx caches it in ~/.npm/_npx on first run. `dsh web` serves the Web UI
+  # on 127.0.0.1:3080 (open the ?token= URL it prints). It needs Node >= 24.9 and nodejs.org's
+  # own build: its native loader disassembles node's internals and rejects nixpkgs' build
+  # ("x64 sysv getter is not a recognized this->field accessor"). The binary is used unpatched
+  # (code bytes must stay as shipped) with Debian's loader; Debian's own nodejs is too old.
+  dshVersion = "0.2.2-rc.1";
+  nodeOfficial = pkgs.stdenvNoCC.mkDerivation rec {
+    pname = "nodejs-official";
+    version = "24.21.0";
+    src = pkgs.fetchurl {
+      url = "https://nodejs.org/dist/v${version}/node-v${version}-linux-x64.tar.xz";
+      hash = "sha256-/Y5Z1aURUQ9qKYr7VI8Yx9KxvkBNi0on2U++SfVsstY=";   # SHASUMS256.txt
+    };
+    dontConfigure = true;
+    dontBuild = true;
+    dontFixup = true;
+    installPhase = "cp -r . $out";
+  };
+  dsh = pkgs.writeShellScriptBin "dsh" ''
+    export PATH=${nodeOfficial}/bin:$PATH
+    exec npx --yes @deepseek-ai/dsh@${dshVersion} "$@"
+  '';
 in
 {
   home.packages = [
@@ -13,6 +36,7 @@ in
     desk.chromium
     desk.tern
     desk.picom
+    dsh
     pkgs.i3
     pkgs.dunst
     pkgs.libnotify
