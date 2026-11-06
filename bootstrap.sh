@@ -39,9 +39,10 @@ sudo apt-get install -y \
   blueman network-manager-gnome tailscale
 if [ "$profile" = "al3rez" ]; then
   sudo apt-get install -y nvidia-settings
-  # driver-level monitor layout + soft DPMS (monitors stay connected while asleep);
-  # takes effect at the next login
+  # driver-level monitor layout, soft DPMS and both outputs pinned as connected with their
+  # EDIDs (monitors never drop off X when asleep or switched off); takes effect at the next login
   sudo install -Dm644 "$here/files/xorg/20-nvidia-desk.conf" /etc/X11/xorg.conf.d/20-nvidia-desk.conf
+  sudo install -Dm644 -t /etc/X11/edid "$here/files/xorg/edid/lg-ultragear.bin" "$here/files/xorg/edid/asus-mb16fc.bin"
 fi
 sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on

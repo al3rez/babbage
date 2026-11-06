@@ -76,13 +76,16 @@ in
     '';
 
     home.activation.nvidiaDeskXorg = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      src="${../files/xorg/20-nvidia-desk.conf}"
-      dest="/etc/X11/xorg.conf.d/20-nvidia-desk.conf"
-      if [ -f "$dest" ] && ! ${pkgs.diffutils}/bin/cmp -s "$src" "$dest"; then
-        $DRY_RUN_CMD echo "WARNING: $dest differs from home-manager; run: sudo install -Dm644 $src $dest"
-      elif [ ! -f "$dest" ]; then
-        $DRY_RUN_CMD echo "WARNING: missing $dest; run: sudo install -Dm644 $src $dest"
-      fi
+      check() {
+        if [ -f "$2" ] && ! ${pkgs.diffutils}/bin/cmp -s "$1" "$2"; then
+          $DRY_RUN_CMD echo "WARNING: $2 differs from home-manager; run: sudo install -Dm644 $1 $2"
+        elif [ ! -f "$2" ]; then
+          $DRY_RUN_CMD echo "WARNING: missing $2; run: sudo install -Dm644 $1 $2"
+        fi
+      }
+      check "${../files/xorg/20-nvidia-desk.conf}" /etc/X11/xorg.conf.d/20-nvidia-desk.conf
+      check "${../files/xorg/edid/lg-ultragear.bin}" /etc/X11/edid/lg-ultragear.bin
+      check "${../files/xorg/edid/asus-mb16fc.bin}" /etc/X11/edid/asus-mb16fc.bin
     '';
   };
 }
