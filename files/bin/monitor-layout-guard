@@ -11,10 +11,12 @@ restarts the ASUS bar can land under the LG one. The bar's _NET_WM_STRUT_PARTIAL
 which monitor the panel meant it for; one ConfigureRequest to that spot makes i3 move the dock
 there. Checked on the same 5s tick (window tree only).
 
-After the monitors drop off and come back, xfce4-panel can keep running while i3 no longer
-manages its bar windows (unmapped, in no dock area), so both bars are gone until the panel
-restarts. A bar i3 still docks but hides for a fullscreen window is fine and left alone; only a
-bar missing from i3's tree for BARS_HIDDEN_FOR seconds while the user is active restarts it.
+Every monitor that is on must have a menu bar that i3 docks. After the monitors drop off and
+come back, xfce4-panel can keep running while i3 no longer manages its bar windows (unmapped, in
+no dock area); the panel can also crash or hang. Any of those, lasting BARS_HIDDEN_FOR seconds
+while the user is active, gets the panel restarted (killed if it won't quit). This runs even
+while the other monitor is off. A bar i3 still docks but hides under a fullscreen window counts
+as present and is left alone.
 Logs and child-process errors go to the user service journal.
 """
 import json
@@ -140,12 +142,16 @@ def i3_windows():
     return ids
 
 
-def dropped_bars(d):
-    """Bar windows of the running panel that i3 no longer manages (not hidden by fullscreen)."""
+def monitors_without_bar(d):
+    """Names of monitors that are on, at their WANT geometry, with no bar docked by i3 (panel
+    down, or bars dropped by i3). A docked bar hidden under a fullscreen window still counts."""
     managed = i3_windows()
     if managed is None:
         return []
-    return [w.id for w, _, _, _ in panel_bars(d, shown_only=False) if w.id not in managed]
+    on = {d.get_atom_name(m.name): (m.x, m.y, m.width_in_pixels, m.height_in_pixels)
+          for m in randr.get_monitors(d.screen().root, True).monitors}
+    docked = {meant_for(strut) for w, _, _, strut in panel_bars(d, shown_only=False) if w.id in managed}
+    return sorted(n for n, g in WANT.items() if on.get(n) == g and g[:2] not in docked)
 
 
 def meant_for(strut):
@@ -171,15 +177,20 @@ def panel_running():
 
 
 def restart_panel():
-    """Quit and start xfce4-panel fresh. After the monitors drop off and come back, the panel
-    keeps running with every bar unmapped; only a fresh start maps them again (never `-r`, which
-    can leave a bar unmapped on this layout). Started through i3 so it docks like at login."""
-    log("menu bar dropped by i3 after the monitors came back; restarting xfce4-panel")
-    subprocess.run(["xfce4-panel", "-q"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
-    for _ in range(50):
-        if not panel_running():
-            break
-        time.sleep(0.1)
+    """Quit (or kill) xfce4-panel and start it fresh. After the monitors drop off and come back,
+    only a fresh start maps the bars again (never `-r`, which can leave a bar unmapped on this
+    layout). Started through i3 so it docks like at login."""
+    log("restarting xfce4-panel")
+    if panel_running():
+        subprocess.run(["xfce4-panel", "-q"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        for _ in range(50):
+            if not panel_running():
+                break
+            time.sleep(0.1)
+        else:
+            log("xfce4-panel did not quit; killing it")
+            subprocess.run(["pkill", "-KILL", "-x", "xfce4-panel"])
+            time.sleep(0.5)
     subprocess.run(["i3-msg", "-q", "exec --no-startup-id /usr/bin/xfce4-panel"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
 
@@ -217,13 +228,16 @@ def main():
             present = active
             if due is None and layout_ok(d):
                 reseat_bars(d)            # window tree only; safe on every tick
-                if active and panel_running() and dropped_bars(d):
-                    hidden_since = hidden_since or now
-                    if now - hidden_since >= BARS_HIDDEN_FOR and now - last_restart >= RESTART_COOLDOWN:
-                        restart_panel()
-                        last_restart, hidden_since = now, None
-                else:
-                    hidden_since = None
+            # Not gated on the layout: the LG must get its bar back even while the ASUS stays off.
+            bare = monitors_without_bar(d) if active else []
+            if bare:
+                hidden_since = hidden_since or now
+                if now - hidden_since >= BARS_HIDDEN_FOR and now - last_restart >= RESTART_COOLDOWN:
+                    log(f"no menu bar on {', '.join(bare)} for {int(now - hidden_since)}s")
+                    restart_panel()
+                    last_restart, hidden_since = now, None
+            else:
+                hidden_since = None
             if due is None or now < due:
                 continue
             wait = check(d)

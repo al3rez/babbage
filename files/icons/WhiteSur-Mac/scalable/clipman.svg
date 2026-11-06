@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <!-- Lucide "clipboard" (ISC licence, lucide.dev), scaled to the menu bar's 18px tray icon height -->
-  <g transform="translate(3.2000 3.1500) scale(0.40000)" fill="none" stroke="#ffffff" stroke-width="3.0000" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Lucide "clipboard" (ISC licence, lucide.dev), scaled for the menu bar tray -->
+  <g transform="translate(2.7200 2.7150) scale(0.44000)" fill="none" stroke="#ffffff" stroke-width="2.7273" stroke-linecap="round" stroke-linejoin="round">
     <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
   </g>
