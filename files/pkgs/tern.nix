@@ -8,6 +8,16 @@
 , webkitgtk_4_1, gtk3, glib, libGL, libxkbcommon, libpulseaudio, pam, glib-networking
 , gsettings-desktop-schemas, libxcb, vulkan-loader, wayland, pipewire, glibcLocales }:
 
+let
+  # see tern-xerror-guard.c: stops a harmless BadWindow from GTK's pointer query killing Tern
+  xerrorGuard = stdenv.mkDerivation {
+    name = "tern-xerror-guard";
+    src = ./tern-xerror-guard.c;
+    dontUnpack = true;
+    buildPhase = "$CC -O2 -Wall -Werror -shared -fPIC -o tern-xerror-guard.so $src -ldl";
+    installPhase = "install -Dm755 tern-xerror-guard.so $out/lib/tern-xerror-guard.so";
+  };
+in
 stdenv.mkDerivation rec {
   pname = "tern";
   version = "0.9.10";
@@ -37,7 +47,8 @@ stdenv.mkDerivation rec {
     makeWrapper $out/libexec/tern/tern $out/bin/tern \
       "''${gappsWrapperArgs[@]}" \
       --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ webkitgtk_4_1 gtk3 glib libGL libxkbcommon libpulseaudio pam libxcb vulkan-loader wayland pipewire ]} \
-      --set-default LOCALE_ARCHIVE ${glibcLocales}/lib/locale/locale-archive
+      --set-default LOCALE_ARCHIVE ${glibcLocales}/lib/locale/locale-archive \
+      --set LD_PRELOAD ${xerrorGuard}/lib/tern-xerror-guard.so
   '';
 
   meta = {
