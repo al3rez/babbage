@@ -44,7 +44,9 @@ exec --no-startup-id systemctl --user start menubar-popovers.service
 # --- launch
 bindsym $mod+Return exec @ghostty@
 bindsym $mod+space exec --no-startup-id @launcher@
-bindsym $mod+d exec xfce4-appfinder
+# --disable-server: a resident appfinder keeps launching the app paths it read at first start,
+# which are old Nix store builds after every home-manager switch
+bindsym $mod+d exec xfce4-appfinder --disable-server
 bindsym $mod+Shift+f exec thunar
 # region screenshot like macOS ⌘⇧4: saved to ~/Pictures/Screenshots and copied to the clipboard
 bindsym Ctrl+Shift+4 exec --no-startup-id @screenshotregion@
