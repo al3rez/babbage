@@ -33,6 +33,9 @@ in
     Service = {
       ExecStart = "${desk.dsh}/bin/dsh web --no-open";
       WorkingDirectory = "%h";
+      # Alibaba Cloud Model Studio Token Plan key (BAILIAN_API_KEY=sk-...), kept out of the repo;
+      # the provider itself is in ~/.dsh/profiles/web/cordis.patch.yml, which the UI also edits
+      EnvironmentFile = "-%h/.config/dsh/bailian.env";
       Restart = "on-failure";
       RestartSec = "3";
     };
