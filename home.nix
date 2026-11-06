@@ -34,6 +34,7 @@ in
     ./modules/power.nix
     ./modules/network.nix
     ./modules/rgb.nix
+    ./modules/deepseek-harness.nix
   ];
 
   home.username = "al3rez";
@@ -68,6 +69,7 @@ in
     slack = gl pkgs.slack;
     chromium = gl pkgs.chromium;   # runs web apps (WhatsApp) in their own windows, like Omarchy
     tern = gl (pkgs.callPackage ./files/pkgs/tern.nix { });   # Stencil's prebuilt tarball
+    dsh = pkgs.callPackage ./files/pkgs/dsh.nix { };   # DeepSeek Harness on nodejs.org's Node
     wallpaper = pkgs.fetchurl {
       name = "wallhaven-gp7mq3.jpg";
       url = "https://w.wallhaven.cc/full/gp/wallhaven-gp7mq3.jpg";
