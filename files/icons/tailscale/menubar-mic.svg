@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 16 16">
-  <!-- microphone tray glyph (files/bin/menubar-popovers MicItem, shown while an app records):
-       Lucide "mic" (ISC) as filled outlines, the volume glyphs' weight, spanning the 18px band -->
-  <path fill="#ffffff" fill-rule="evenodd" d="M8.000 3.200H8.000A1.878 1.878 0 0 1 9.877 5.078V8.000A1.878 1.878 0 0 1 8.000 9.878H8.000A1.878 1.878 0 0 1 6.122 8.000V5.078A1.878 1.878 0 0 1 8.000 3.200ZM8.000 4.450H8.000A0.628 0.628 0 0 1 8.627 5.078V8.000A0.628 0.628 0 0 1 8.000 8.628H8.000A0.628 0.628 0 0 1 7.372 8.000V5.078A0.628 0.628 0 0 1 8.000 4.450Z"/>
-  <path fill="#ffffff" d="M11.548 7.165V8.000A3.548 3.548 0 0 1 4.452 8.000V7.165A0.625 0.625 0 0 1 5.702 7.165V8.000A2.298 2.298 0 0 0 10.298 8.000V7.165A0.625 0.625 0 0 1 11.548 7.165Z"/>
-  <path fill="#ffffff" d="M7.375 10.298V12.175A0.625 0.625 0 0 0 8.625 12.175V10.298Z"/>
-</svg>
