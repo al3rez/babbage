@@ -19,12 +19,28 @@ built with a Nix Home Manager flake.
 
 ![Babbage at 4K](docs/screenshot.png)
 
-<sub>Historical 3840×2160 screenshot from the Debian 13 VM: Firefox (now removed), Telegram
-and Ghostty tiled by i3, a notification in the bar. Below, the two top halves at 1:1 (no scaling).</sub>
+<sub>3840×2160, taken in a Debian 13 VM set up by `bootstrap.sh al3rez-vm`: two Ghostty windows
+tiled by i3 (the focused one bright, the other dimmed), every window with the `ring` edge (picom's GLX
+backend, as on the NVIDIA profile; the Mesa profile's xrender draws no edges), a
+notification in the middle of the bar. Below, the two top halves at 1:1 (no scaling).</sub>
 
-| Left: workspace + pinned apps, Firefox | Right: notification in the bar, status icons, clock, Telegram |
+| Left: workspace + pinned apps | Right: notification in the bar, status icons, clock |
 |---|---|
 | ![left half at 1:1](docs/zoom-left.png) | ![right half at 1:1](docs/zoom-right.png) |
+
+Window edges come in three styles (`edge` in `modules/compositor.nix`), shown here 3× where the
+focused window (left) meets an unfocused one:
+
+| `ring` (default): 1pt dark outline + light rim | `hairline`: 1pt light rim, brightest on top | `gloss`: a glint lit from the top-left |
+|---|---|---|
+| ![ring edge](docs/edge-ring.png) | ![hairline edge](docs/edge-hairline.png) | ![gloss edge](docs/edge-gloss.png) |
+
+Installed and pinned by default, each with a macOS-style icon (Telegram and Hex live in the tray):
+
+| | | | | | |
+|:-:|:-:|:-:|:-:|:-:|:-:|
+| <a href="https://ghostty.org"><img src="docs/apps/ghostty.png" width="64" alt="Ghostty"></a><br><sub>Ghostty</sub> | <a href="https://cursor.com"><img src="docs/apps/grok-bot.png" width="64" alt="Grok Bot"></a><br><sub>Grok Bot</sub> | <a href="https://openai.com/chatgpt/desktop/"><img src="docs/apps/chatgpt.png" width="64" alt="ChatGPT"></a><br><sub>ChatGPT</sub> | <a href="https://github.com/pingdotgg/t3code"><img src="docs/apps/t3code.png" width="64" alt="T3 Code"></a><br><sub>T3 Code</sub> | <a href="https://slack.com"><img src="docs/apps/slack.png" width="64" alt="Slack"></a><br><sub>Slack</sub> | <a href="https://web.whatsapp.com"><img src="docs/apps/whatsapp.png" width="64" alt="WhatsApp"></a><br><sub>WhatsApp</sub> |
+| <a href="https://stencil.so/tern"><img src="docs/apps/tern.png" width="64" alt="Tern"></a><br><sub>Tern</sub> | <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="docs/apps/deepseek-harness.png" width="64" alt="DeepSeek Harness"></a><br><sub>DeepSeek Harness</sub> | <a href="https://www.google.com/chrome/"><img src="docs/apps/google-chrome.png" width="64" alt="Chrome"></a><br><sub>Chrome</sub> | <a href="https://store.steampowered.com"><img src="docs/apps/steam.png" width="64" alt="Steam"></a><br><sub>Steam</sub> | <a href="https://telegram.org"><img src="docs/apps/telegram.png" width="64" alt="Telegram"></a><br><sub>Telegram</sub> | <a href="https://anoma.ly/hex/"><img src="docs/apps/hex.png" width="64" alt="Hex"></a><br><sub>Hex</sub> |
 
 Notifications are one line in the middle of the bar: no card, no background. picom slides them
 down in and back up out (recorded in the VM at 60 fps, real speed, then 4× slower):

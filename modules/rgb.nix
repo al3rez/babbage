@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, gpu, ... }:
 
 let
   # RGB off on every login: the two ENE DRAM sticks and the ASRock B850M board's Polychrome
@@ -16,7 +16,8 @@ let
     exec $openrgb --noautoconnect $args
   '';
 in
-{
+# this machine's hardware only (the NVIDIA desk profile); elsewhere there's nothing to turn off
+lib.mkIf (gpu == "nvidia") {
   home.packages = [ pkgs.openrgb ];
 
   systemd.user.services.rgb-off = {
