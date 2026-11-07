@@ -5,7 +5,7 @@
 <h1 align="center">Babbage</h1>
 
 <p align="center">
-  <b>A macOS-style Debian 13 desktop, built with Nix</b><br>
+  <b>An opinionated Debian 13 desktop, built with Nix</b><br>
   XFCE + i3 tiling · flat menu bar · Ghostty · notifications that slide into the bar
 </p>
 
@@ -13,7 +13,7 @@
 
 ---
 
-Debian 13 + XFCE running i3 tiling, with a flat macOS-style menu bar, Ghostty and
+An opinionated Debian 13 setup: XFCE running i3 tiling, one flat menu bar, Ghostty, and
 notifications that slide into the bar. One command takes a fresh Debian install there,
 built with a Nix Home Manager flake.
 
@@ -41,7 +41,7 @@ focused window (left) meets an unfocused one:
 |---|---|---|
 | ![ring edge](docs/edge-ring.png) | ![hairline edge](docs/edge-hairline.png) | ![gloss edge](docs/edge-gloss.png) |
 
-Installed and pinned by default, each with a macOS-style icon (Telegram and Hex live in the tray):
+Installed and pinned by default, each with a matching rounded icon (Telegram and Hex live in the tray):
 
 | | | | | | |
 |:-:|:-:|:-:|:-:|:-:|:-:|

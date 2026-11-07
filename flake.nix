@@ -1,5 +1,5 @@
 {
-  description = "Babbage: a macOS-style Debian 13 desktop (XFCE + i3, flat menu bar, Ghostty, dunst, picom)";
+  description = "Babbage: an opinionated Debian 13 desktop (XFCE + i3, flat menu bar, Ghostty, dunst, picom)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
