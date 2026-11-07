@@ -37,6 +37,10 @@ window.popup, .popup { background-color: transparent; }
   color: transparent; -gtk-icon-source: none; -gtk-icon-transform: scale(0); opacity: 0; }
 /* it still keeps a few pixels; take them back from the volume button next to it */
 #pulseaudio-21 button { padding-left: 0; }
+/* the volume item's own recording indicator (a red mic left of the speaker, always on while
+   anything records): replaced by the tray's white mic (files/bin/menubar-popovers MicItem), so
+   it is invisible and its 30px slot cancelled out, leaving the tray where it was */
+#pulseaudio-21 .recording-indicator { opacity: 0; margin-left: -30px; }
 
 /* switches and sliders (volume pop-up, settings): macOS style, matching the Tailscale popover */
 switch { min-width: 54px; min-height: 30px; border-radius: 16px; border: none; padding: 0;

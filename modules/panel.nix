@@ -31,6 +31,7 @@ let
     export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
     export TAILSCALE=/usr/bin/tailscale XCLIP=${pkgs.xclip}/bin/xclip
     export I3=${pkgs.i3}/bin/i3 XFCONF_QUERY=/usr/bin/xfconf-query
+    export PACTL=${pkgs.pulseaudio}/bin/pactl   # talks to PipeWire's pulse server (mic indicator)
     export MENUBAR_ICONS=${../files/icons/tailscale}
     exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/menubar-popovers} "$@"
   '';
@@ -200,9 +201,14 @@ in
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
     # Electron apps (ChatGPT, Slack) put a fixed full-colour bitmap in the tray that can't be themed
-    # like the white glyphs; they're pinned on the bar anyway. Wi-Fi, Telegram and Bluetooth
+    # like the white glyphs; they're pinned on the bar anyway. Wi-Fi, Telegram, Bluetooth and Hex
     # are shown by files/bin/menubar-popovers' stand-ins instead (their popovers).
-    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "nm-applet" "TelegramDesktop" "blueman" ];
+    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "nm-applet" "TelegramDesktop" "blueman" "hex" ];
+    # tray order (the tray lists items in this order and puts new ones first): Hex, Wi-Fi,
+    # Bluetooth, Telegram, Tailscale, then the microphone last, next to the volume item
+    "plugins/plugin-6/known-items" = [ "menubar-hex" "menubar-wi-fi" "menubar-bluetooth" "menubar-telegram"
+                                       "tailscale" "menubar-mic" "hex" "steam" "ZapZap" "Slack_status_icon_1"
+                                       "nm-applet" "chrome_status_icon_1" "TelegramDesktop" "blueman" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 

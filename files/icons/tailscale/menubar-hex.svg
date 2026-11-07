@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+  <!-- Hex dictation tray glyph (files/bin/menubar-popovers): Hex's nested-hexagon mark as a white
+       ring + core with the Wi-Fi glyph's ~2.3px weight, 5% wider than a regular hexagon (points
+       read narrow) and centred at x 15.5 so its vertical sides land on whole pixels -->
+  <polygon points="15.500,6.382 23.336,10.691 23.336,19.309 15.500,23.618 7.664,19.309 7.664,10.691" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linejoin="round"/>
+  <polygon points="15.500,11.816 18.395,13.408 18.395,16.592 15.500,18.184 12.605,16.592 12.605,13.408" fill="#ffffff" stroke="#ffffff" stroke-width="1.0" stroke-linejoin="round"/>
+</svg>

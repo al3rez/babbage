@@ -8,10 +8,15 @@ menu, and opens one popover style for all of them:
   * Tailscale: its own icon (files/icons/tailscale, faint when disconnected) and content:
     on/off switch, this device, every device with its IP (click copies), offline devices,
     exit node, admin console. (`tailscale systray` draws a fixed bitmap that can't match.)
-  * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi): a stand-in icon mirroring
+  * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi, Hex): a stand-in icon mirroring
     the app's own icon; the original is hidden in the tray (modules/panel.nix hidden-items).
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
     submenus expand in place, disabled items greyed; choosing an item sends the click back.
+
+  * Microphone: a white mic at the end of the tray, shown only while an app records (a Hex
+    dictation, a call), like macOS's recording indicator; its popover lists who is recording.
+    Read from the sound server's source outputs (`pactl subscribe`, no polling); level meters
+    (peak detection) and monitor captures don't count. Replaces the volume item's own red mic.
 
 Pinned apps also get a notification dot, like the macOS Dock: dunst calls Notified(appname)
 over D-Bus (io.github.al3rez.Menubar, hooked up in modules/notifications.nix); if the app is
@@ -45,6 +50,7 @@ ICONS = os.environ["MENUBAR_ICONS"]
 XCLIP = os.environ.get("XCLIP", "xclip")
 I3 = os.environ.get("I3", "i3")
 XFCONF = os.environ.get("XFCONF_QUERY", "xfconf-query")
+PACTL = os.environ.get("PACTL", "pactl")
 PANEL_DIR = os.path.expanduser("~/.config/xfce4/panel")
 BADGE_BUS = "io.github.al3rez.Menubar"
 BADGE_XML = """
@@ -59,7 +65,7 @@ BAR = 36          # menu bar height (px)
 WIDTH_PT = 340    # popover width in points (macOS popovers are ~300-340pt)
 
 # tray Id -> stand-in title (tooltip fallback)
-PROXIED = {"nm-applet": "Wi-Fi", "TelegramDesktop": "Telegram", "blueman": "Bluetooth"}
+PROXIED = {"nm-applet": "Wi-Fi", "TelegramDesktop": "Telegram", "blueman": "Bluetooth", "hex": "Hex"}
 
 WATCHER = ("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
 SNI = "org.kde.StatusNotifierItem"
@@ -393,6 +399,91 @@ class TailscaleItem(TrayItem):
         self.app.popover.rebuild()
 
 
+class MicItem(TrayItem):
+    """White mic in the tray while any app records from a microphone (Passive, so hidden, otherwise)."""
+
+    def __init__(self, app):
+        self.apps = []
+        super().__init__(app, "/menubar/mic")
+        self.watch()
+        self.refresh()
+
+    def watch(self):
+        """`pactl subscribe` prints a line per change; re-read the recorders after source-output ones."""
+        try:
+            proc = subprocess.Popen([PACTL, "subscribe"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, bufsize=1)
+        except OSError:
+            return
+        self.pending = False
+        def on_line(ch, cond):
+            if cond & (GLib.IO_HUP | GLib.IO_ERR):
+                GLib.timeout_add_seconds(3, lambda: self.watch() or False)   # sound server restarted
+                return False
+            line = ch.readline()
+            if "source-output" in line and not self.pending:
+                self.pending = True   # a stream start/stop arrives as several events: read once
+                GLib.timeout_add(150, self.refresh)
+            return True
+        GLib.io_add_watch(GLib.IOChannel.unix_new(proc.stdout.fileno()), GLib.PRIORITY_DEFAULT,
+                          GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_line)
+        self.proc = proc
+
+    def recorders(self):
+        try:
+            outs = json.loads(subprocess.run([PACTL, "-f", "json", "list", "source-outputs"], capture_output=True,
+                                             text=True, timeout=3).stdout or "[]")
+            srcs = {s.get("index"): s.get("name", "") for s in json.loads(subprocess.run(
+                [PACTL, "-f", "json", "list", "sources"], capture_output=True, text=True, timeout=3).stdout or "[]")}
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return []
+        names = []
+        for o in outs:
+            p = o.get("properties") or {}
+            if (p.get("media.name") == "Peak detect" or "PEAK_DETECT" in str(o.get("flags", ""))
+                    or srcs.get(o.get("source"), "").endswith(".monitor")):
+                continue   # level meters and loopbacks of what's playing aren't someone listening
+            name = p.get("application.name") or p.get("application.process.binary") or p.get("node.name") or "An app"
+            if name not in names:
+                names.append(name)
+        return names
+
+    def refresh(self):
+        self.pending = False
+        apps = self.recorders()
+        if apps != self.apps:
+            was = bool(self.apps)
+            self.apps = apps
+            if bool(apps) != was:
+                self.emit("NewStatus", GLib.Variant("(s)", (self.status(),)))
+            self.emit("NewToolTip")
+            pop = self.app.popover
+            if pop.get_visible() and pop.owner is self:
+                pop.rebuild() if apps else pop.close()
+        return False
+
+    def status(self):
+        return "Active" if self.apps else "Passive"
+
+    def tooltip(self):
+        return "Microphone in use by " + ", ".join(self.apps) if self.apps else "Microphone not in use"
+
+    def props(self):
+        return {
+            "Category": GLib.Variant("s", "Hardware"), "Id": GLib.Variant("s", "menubar-mic"),
+            "Title": GLib.Variant("s", "Microphone"), "Status": GLib.Variant("s", self.status()),
+            "IconName": GLib.Variant("s", "menubar-mic"), "IconThemePath": GLib.Variant("s", ICONS),
+            "IconPixmap": GLib.Variant("a(iiay)", []), "ItemIsMenu": GLib.Variant("b", False),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", ("", [], "Microphone", self.tooltip())),
+        }
+
+    def fill(self, pop, card):
+        pop.header(card, None, "Microphone")
+        pop.section(card, "In use by")
+        for name in self.apps or ["No app"]:
+            pop.row(card, None, name, "", None, *(() if self.apps else ("muted",)))
+
+
 class ProxyItem(TrayItem):
     """Stands in for an app's tray icon: same icon, our popover with the app's menu."""
 
@@ -444,6 +535,9 @@ class ProxyItem(TrayItem):
             # is filled shapes on a 16px grid whose seams turn jagged at bar size.
             pct = int("".join(ch for ch in icon[len("nm-signal-"):] if ch.isdigit()) or 0)
             icon, theme_path = f"menubar-wifi-{0 if pct == 0 else 1 if pct <= 25 else 2 if pct <= 50 else 3}", ICONS
+        elif self.title == "Hex":
+            # Hex sends only a fixed 32px colour bitmap (no icon name): our white glyph instead
+            icon, theme_path = "menubar-hex", ICONS
         elif icon and not icon.endswith("-symbolic") and Gtk.IconTheme.get_default().has_icon(icon + "-symbolic"):
             icon += "-symbolic"   # symbolic variants render like the other tray glyphs
         return {
@@ -453,7 +547,7 @@ class ProxyItem(TrayItem):
             "Status": GLib.Variant("s", o.get("Status", "Passive") if o else "Passive"),
             "IconName": GLib.Variant("s", icon),
             "IconThemePath": GLib.Variant("s", theme_path),
-            "IconPixmap": GLib.Variant("a(iiay)", o.get("IconPixmap", [])),
+            "IconPixmap": GLib.Variant("a(iiay)", [] if self.title == "Hex" else o.get("IconPixmap", [])),
             "ItemIsMenu": GLib.Variant("b", False),
             "ToolTip": GLib.Variant("(sa(iiay)ss)", (tip[0], tip[1], tip[2] or self.title, tip[3])),
         }
@@ -711,6 +805,7 @@ class App:
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
         self.sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
         self.tailscale = TailscaleItem(self)
+        self.mic = MicItem(self)
         self.badges = Badges(self)
         self.proxies = {}   # tray Id -> ProxyItem
         self.bus.signal_subscribe(WATCHER[0], WATCHER[2], None, WATCHER[1], None,
@@ -721,6 +816,7 @@ class App:
 
     def on_tray(self, *_):
         self.tailscale.register()
+        self.mic.register()
         for p in self.proxies.values():
             p.register()
         self.scan()

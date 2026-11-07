@@ -13,5 +13,8 @@
     # (files/i3/config), like clipboard-history and menubar-popovers
     autostart = false;
     installModel = true;   # the hex-model user service downloads the default model once
+    # open the mic only while dictating, so the bar's mic indicator means "recording now" (as on
+    # macOS) instead of staying lit while Hex idles
+    settings.release_microphone_while_idle = true;
   };
 }
