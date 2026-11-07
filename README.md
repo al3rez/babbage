@@ -30,9 +30,9 @@ notification in the middle of the bar. Below, the two top halves at 1:1 (no scal
 
 The second monitor (ASUS MB16FC, 1920×1200 at 150%) gets its own bar: only its own workspaces
 (4–6), the same pinned apps, volume, search, control centre and clock; the tray stays on the main
-bar. Taken on this machine with an empty workspace:
+bar. Taken on this machine with T3 Code open (its project list and thread blurred):
 
-![ASUS monitor with its own menu bar](docs/screenshot-asus.png)
+![ASUS monitor with its own menu bar and T3 Code](docs/screenshot-asus.png)
 
 Window edges come in three styles (`edge` in `modules/compositor.nix`), shown here 3× where the
 focused window (left) meets an unfocused one:
