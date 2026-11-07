@@ -37,10 +37,10 @@ window.popup, .popup { background-color: transparent; }
   color: transparent; -gtk-icon-source: none; -gtk-icon-transform: scale(0); opacity: 0; }
 /* it still keeps a few pixels; take them back from the volume button next to it */
 #pulseaudio-21 button { padding-left: 0; }
-/* no microphone in the bar: the volume item's recording indicator (a red mic left of the
+/* no microphone in the bar: the volume items' recording indicator (a red mic left of the
    speaker, on whenever anything records, i.e. always while Hex listens) is invisible and its
-   30px slot cancelled out, so the tray doesn't move */
-#pulseaudio-21 .recording-indicator { opacity: 0; margin-left: -30px; }
+   30px slot cancelled out, so nothing moves. Both bars: plugin 21 (LG) and 60 (ASUS) */
+#pulseaudio-21 .recording-indicator, #pulseaudio-60 .recording-indicator { opacity: 0; margin-left: -30px; }
 
 /* switches and sliders (volume pop-up, settings): macOS style, matching the Tailscale popover */
 switch { min-width: 54px; min-height: 30px; border-radius: 16px; border: none; padding: 0;
