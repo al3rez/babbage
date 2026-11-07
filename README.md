@@ -1,10 +1,23 @@
-# devbox
+<p align="center">
+  <img src="docs/identity/icon-512.png" width="168" alt="Babbage">
+</p>
+
+<h1 align="center">Babbage</h1>
+
+<p align="center">
+  <b>A macOS-style Debian 13 desktop, built with Nix</b><br>
+  XFCE + i3 tiling · flat menu bar · Ghostty · notifications that slide into the bar
+</p>
+
+<p align="center"><sub>The face of the project is Charles Babbage, after an 1860 photograph (public domain), printed as a halftone. Identity: <a href="docs/identity/IDENTITY.md"><code>docs/identity/IDENTITY.md</code></a>.</sub></p>
+
+---
 
 Debian 13 + XFCE running i3 tiling, with a flat macOS-style menu bar, Ghostty and
 notifications that slide into the bar. One command takes a fresh Debian install there,
 built with a Nix Home Manager flake.
 
-![devbox at 4K](docs/screenshot.png)
+![Babbage at 4K](docs/screenshot.png)
 
 <sub>Historical 3840×2160 screenshot from the Debian 13 VM: Firefox (now removed), Telegram
 and Ghostty tiled by i3, a notification in the bar. Below, the two top halves at 1:1 (no scaling).</sub>
@@ -19,7 +32,7 @@ down in and back up out (recorded in the VM at 60 fps, real speed, then 4× slow
 ![notification sliding into the menu bar](docs/notification.gif)
 
 ```sh
-git clone https://github.com/al3rez/devbox ~/.config/home-manager
+git clone https://github.com/al3rez/babbage ~/.config/home-manager
 ~/.config/home-manager/bootstrap.sh              # NVIDIA machine (LG 4K + ASUS layout)
 ~/.config/home-manager/bootstrap.sh al3rez-vm    # anything else (Mesa)
 ```
