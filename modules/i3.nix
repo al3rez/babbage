@@ -64,6 +64,10 @@ in
       ]
       (builtins.readFile ../files/i3/config);
 
+  # the same launcher as `launcher` in the profile: the menu bar's search icon opens it too
+  # (modules/panel.nix, launcher-25/61)
+  home.packages = [ (pkgs.runCommand "launcher" { } "mkdir -p $out/bin && ln -s ${launcher} $out/bin/launcher") ];
+
   # the clipboard recorder. Like the monitor guard it hangs off default.target (XFCE never starts
   # graphical-session.target) and retries until X is up; i3 also starts it at login.
   systemd.user.services.clipboard-history = {

@@ -78,6 +78,15 @@ let
     Terminal=false
   '';
 
+  # the bar's search icon: the Raycast-style launcher (Super+Space, modules/i3.nix), not xfce4-appfinder
+  spotlightDesktop = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Search
+    Exec=${config.home.profileDirectory}/bin/launcher
+    Icon=system-search-symbolic
+  '';
+
   # Slack from nixpkgs, with its icon on the same squircle as the others (files/bin/make-app-icon)
   slackDesktop = ''
     [Desktop Entry]
@@ -260,10 +269,10 @@ in
       NoDisplay=true
       X-GNOME-Autostart-enabled=true
     '';
-    "xfce4/panel/launcher-25/spotlight.desktop".source = ../files/panel/launcher-25/spotlight.desktop;
+    "xfce4/panel/launcher-25/spotlight.desktop".text = spotlightDesktop;
     "xfce4/panel/launcher-26/control-center.desktop".source = ../files/panel/launcher-26/control-center.desktop;
   } // lib.optionalAttrs dual {
-    "xfce4/panel/launcher-61/spotlight.desktop".source = ../files/panel/launcher-25/spotlight.desktop;
+    "xfce4/panel/launcher-61/spotlight.desktop".text = spotlightDesktop;
     "xfce4/panel/launcher-62/control-center.desktop".source = ../files/panel/launcher-26/control-center.desktop;
   };
 
