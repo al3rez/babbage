@@ -40,6 +40,7 @@ exec_always --no-startup-id @i3wsbar@
 exec --no-startup-id systemctl --user start clipboard-history.service
 exec --no-startup-id systemctl --user start monitor-layout-guard.service
 exec --no-startup-id systemctl --user start menubar-popovers.service
+exec --no-startup-id systemctl --user start hex.service
 
 # --- launch
 bindsym $mod+Return exec @ghostty@

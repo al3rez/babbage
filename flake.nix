@@ -15,9 +15,15 @@
       url = "github:numtide/nix-gl-host";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Hex voice dictation (modules/hex.nix); same nixpkgs/glibc as the rest, as its docs advise
+    hex = {
+      url = "github:anomalyco/hex";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
-  outputs = { nixpkgs, home-manager, nixgl, nix-gl-host, ... }:
+  outputs = { nixpkgs, home-manager, nixgl, nix-gl-host, hex, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -26,7 +32,7 @@
       };
       mkHome = gpu: home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
-        extraSpecialArgs = { inherit nixgl gpu; nixglhost = nix-gl-host.packages.${system}.default; };
+        extraSpecialArgs = { inherit nixgl gpu hex; nixglhost = nix-gl-host.packages.${system}.default; };
         modules = [ ./home.nix ];
       };
     in

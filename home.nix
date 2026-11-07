@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nixgl, nixglhost, gpu, ... }:
+{ config, lib, pkgs, nixgl, nixglhost, gpu, hex, ... }:
 
 let
   # NVIDIA: run GL apps against the host's own driver libraries (nix-gl-host), so they always
@@ -35,6 +35,7 @@ in
     ./modules/network.nix
     ./modules/rgb.nix
     ./modules/deepseek-harness.nix
+    ./modules/hex.nix
   ];
 
   home.username = "al3rez";
@@ -70,6 +71,8 @@ in
     chromium = gl pkgs.chromium;   # runs web apps (WhatsApp) in their own windows, like Omarchy
     tern = gl (pkgs.callPackage ./files/pkgs/tern.nix { });   # Stencil's prebuilt tarball
     dsh = pkgs.callPackage ./files/pkgs/dsh.nix { };   # DeepSeek Harness on nodejs.org's Node
+    # Hex dictation from its flake; mainProgram kept for the HM module's lib.getExe
+    hex = gl hex.packages.${pkgs.stdenv.hostPlatform.system}.default // { meta.mainProgram = "hex"; };
     wallpaper = pkgs.fetchurl {
       name = "wallhaven-gp7mq3.jpg";
       url = "https://w.wallhaven.cc/full/gp/wallhaven-gp7mq3.jpg";
