@@ -13,17 +13,26 @@ let
     ring = ../files/picom/edge-ring.frag;
     hairline = ../files/picom/edge-hairline.frag;
   }.${edge};
+  # app window corners (the edge styles above follow either shape):
+  #   "square"   flat, no rounding
+  #   "rounded"  15px corners (10pt at 1.5x)
+  corners = "square";
+  radius = { square = "0"; rounded = "15"; }.${corners};
 in
 {
-  # picom: macOS 15px window corners, unfocused windows dimmed, transparent bar, no shadows,
-  # notification slide animation.
+  # picom: app window corners (`corners` above), unfocused windows dimmed, transparent bar, no
+  # shadows, notification slide animation.
   # i3 starts it (see modules/i3.nix): XFCE autostart could race the session and not come up.
-  # @gloss@ becomes the edge shader on app windows (glx only; xrender has no shaders).
-  # Absolute store path: picom looks for relative shaders next to the resolved config file,
+  # @gloss@ becomes the edge shader on app windows and @plain@ a pass-through one on fullscreen
+  # windows (glx only; xrender has no shaders), so fullscreen never shows an edge.
+  # Absolute store paths: picom looks for relative shaders next to the resolved config file,
   # which is a lone file in /nix/store.
   xdg.configFile."picom/picom.conf".text =
     builtins.replaceStrings
-      [ ''backend = "glx";'' "@gloss@" ]
-      [ ''backend = "${backend}";'' (if gpu == "nvidia" then ''shader = "${edgeShader}";'' else "") ]
+      [ ''backend = "glx";'' "@gloss@" "@plain@" "@radius@" ]
+      [ ''backend = "${backend}";''
+        (if gpu == "nvidia" then ''shader = "${edgeShader}";'' else "")
+        (if gpu == "nvidia" then ''shader = "${../files/picom/plain.frag}";'' else "")
+        radius ]
       (builtins.readFile ../files/picom/picom.conf);
 }

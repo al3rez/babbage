@@ -6,7 +6,7 @@
 in vec2 texcoord;              // fragment position in window pixels
 uniform sampler2D tex;         // window contents (premultiplied alpha)
 uniform vec2 effective_size;   // window size in pixels
-uniform float corner_radius;   // pixels; 0 for fullscreen and other square windows
+uniform float corner_radius;   // pixels; 0 for square windows
 
 vec4 default_post_processing(vec4 c);
 
@@ -16,9 +16,8 @@ const float ON_LIGHT = 0.12;   // darkening instead, where the content is light
 
 vec4 window_shader() {
     vec4 c = texture(tex, texcoord / vec2(textureSize(tex, 0)));
-    if (corner_radius <= 0.0) {
-        return default_post_processing(c);
-    }
+    // corner_radius 0 (square corners) measures from a plain rectangle; fullscreen windows get
+    // plain.frag instead (picom.conf), so they never show an edge
     vec2 half_size = effective_size / 2.0;
     vec2 p = texcoord - half_size;
     vec2 q = abs(p) - half_size + vec2(corner_radius);
