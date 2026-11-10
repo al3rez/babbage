@@ -30,4 +30,11 @@
   # blueman's file-transfer plugin races obexd at login and fails with a D-Bus
   # "Timeout was reached"; Bluetooth file transfer isn't used here
   dconf.settings."org/blueman/general".plugin-list = [ "!TransferService" ];
+
+  # dark mode for apps that follow GNOME's preference (GTK4/libadwaita, Chrome, Electron, and
+  # anything asking the settings portal); GTK3 apps get Adwaita-dark from xsettings (modules/xfce.nix)
+  dconf.settings."org/gnome/desktop/interface" = {
+    color-scheme = "prefer-dark";
+    gtk-theme = "Adwaita-dark";
+  };
 }

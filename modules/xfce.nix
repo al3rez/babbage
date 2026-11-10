@@ -14,6 +14,9 @@
       "Gtk/CursorThemeSize" = 32;
       "Gtk/FontName" = "Inter 10";
       "Net/IconThemeName" = "WhiteSur-Mac";
+      # dark apps: GTK3 apps take the theme; GTK4/libadwaita, Chrome and Electron read the
+      # GNOME colour scheme (modules/theme.nix)
+      "Net/ThemeName" = "Adwaita-dark";
     };
 
     # xfwm4 is only a fallback now (i3 runs instead); keep it titleless and compositor-free
