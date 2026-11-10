@@ -11,7 +11,6 @@ in
     desk.telegram
     desk.slack
     desk.chromium
-    desk.tern
     desk.picom
     desk.dsh
     pkgs.i3
@@ -25,7 +24,7 @@ in
     pkgs.inter
     pkgs.nerd-fonts.symbols-only
 
-    # Nix GUI apps (wrapGAppsHook, nixglhost: Tern, Ghostty, ...) export LD_LIBRARY_PATH and
+    # Nix GUI apps (wrapGAppsHook, nixglhost: Ghostty, ...) export LD_LIBRARY_PATH and
     # GIO/GDK module paths pointing at Nix's glib. Links they open run Debian's xdg-open ->
     # exo-open -> a host browser with that env, which can die with "GLIBC_2.43 not found".
     # This xdg-open comes first on their PATH and hands over a clean env.

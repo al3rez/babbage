@@ -69,7 +69,6 @@ in
     picom = gl pkgs.picom;
     slack = gl pkgs.slack;
     chromium = gl pkgs.chromium;   # runs web apps (WhatsApp) in their own windows, like Omarchy
-    tern = gl (pkgs.callPackage ./files/pkgs/tern.nix { });   # Stencil's prebuilt tarball
     dsh = pkgs.callPackage ./files/pkgs/dsh.nix { };   # DeepSeek Harness on nodejs.org's Node
     # Hex dictation from its flake; mainProgram kept for the HM module's lib.getExe
     hex = gl hex.packages.${pkgs.stdenv.hostPlatform.system}.default // { meta.mainProgram = "hex"; };
