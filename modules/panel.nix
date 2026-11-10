@@ -54,6 +54,11 @@ let
     "plugins/plugin-${toString id}/digital-time-font" = "Inter 10";
     "plugins/plugin-${toString id}/digital-time-format" = "%a %b %-d  %-I:%M %p";
   };
+  # menu bar look, on both bars:
+  #   "clear"  transparent: the wallpaper shows through, white glyphs and text over it
+  #   "black"  flat solid black: no wallpaper behind it, same white glyphs and text
+  barStyle = "black";
+  barRgba = { clear = [ 0.0 0.0 0.0 0.0 ]; black = [ 0.0 0.0 0.0 1.0 ]; }.${barStyle};
   panelLook = n: {
     "panels/panel-${toString n}/position" = "p=9;x=0;y=0";
     "panels/panel-${toString n}/position-locked" = true;
@@ -61,7 +66,7 @@ let
     "panels/panel-${toString n}/size" = 36;
     "panels/panel-${toString n}/icon-size" = 30;
     "panels/panel-${toString n}/background-style" = 1;
-    "panels/panel-${toString n}/background-rgba" = [ 0.0 0.0 0.0 0.0 ];
+    "panels/panel-${toString n}/background-rgba" = barRgba;
     "panels/panel-${toString n}/enter-opacity" = 100;
     "panels/panel-${toString n}/leave-opacity" = 100;
   };

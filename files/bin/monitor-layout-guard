@@ -70,9 +70,12 @@ def layout_ok(d):
 
 
 def user_present(d):
-    info = d.dpms_info()
-    if info.state and info.power_level != dpms.DPMSModeOn:
-        return False
+    # an X server without the DPMS extension (another desktop's session) has no dpms_info:
+    # judge by input idle time alone instead of failing every check
+    if hasattr(d, "dpms_info"):
+        info = d.dpms_info()
+        if info.state and info.power_level != dpms.DPMSModeOn:
+            return False
     return d.screen().root.screensaver_query_info().idle < ACTIVE_WITHIN_MS
 
 
