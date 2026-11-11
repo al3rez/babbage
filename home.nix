@@ -29,6 +29,7 @@ in
     ./modules/notifications.nix
     ./modules/ghostty.nix
     ./modules/theme.nix
+    ./modules/appearance.nix
     ./modules/shell.nix
     ./modules/monitors.nix
     ./modules/power.nix

@@ -54,8 +54,9 @@
 
 
 # macOS-equivalent text size at 144 DPI (~13pt on a Mac) and comfortable padding
-# colours: omp's default dark theme (themes/omp-dark)
-theme = omp-dark
+# colours: omp's light theme by day, its dark theme by night, following the system colour
+# scheme that modules/appearance.nix switches by the clock (themes/omp-light, themes/omp-dark)
+theme = light:omp-light,dark:omp-dark
 font-family = TX-02
 font-size = 10
 window-padding-x = 10
