@@ -77,7 +77,6 @@ in
     };
     Service = {
       Environment = [
-        "DISPLAY=:0"
         "XDG_DATA_DIRS=%h/.nix-profile/share:/usr/local/share:/usr/share"   # app names + icons
       ];
       ExecStart = "${clipboardHistory} --daemon";

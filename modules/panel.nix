@@ -83,6 +83,19 @@ let
     Terminal=false
   '';
 
+  # Warp's own AppImage (~/.local/opt/warp, not nixpkgs): it updates itself in place, which a
+  # read-only store copy can't. Icon: its artwork fitted to the squircle (files/bin/make-app-icon)
+  warpDesktop = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Warp
+    Comment=Warp terminal
+    Exec=${config.home.homeDirectory}/.local/opt/warp/Warp-x86_64.AppImage %U
+    Icon=warp-mac
+    StartupWMClass=dev.warp.Warp
+    Terminal=false
+  '';
+
   # the bar's search icon: the Raycast-style launcher (Super+Space, modules/i3.nix), not xfce4-appfinder
   spotlightDesktop = ''
     [Desktop Entry]
@@ -161,6 +174,7 @@ let
       lines;
   pinned = {
     "ghostty.desktop" = ghosttyDesktop;
+    "warp.desktop" = warpDesktop;
     "grok-bot.desktop" = builtins.readFile ../files/panel/grok-bot.desktop;
     "chatgpt.desktop" = builtins.readFile ../files/panel/chatgpt.desktop;
     "t3code.desktop" = builtins.readFile ../files/panel/t3code.desktop;
@@ -172,12 +186,12 @@ let
   };
   # launcher plugin id -> file; real files, not store links: the launcher plugin copies a file
   # it can't write to a numbered copy and then never sees later changes
-  pinnedLaunchers = { "27" = "ghostty.desktop"; "34" = "grok-bot.desktop"; "65" = "chatgpt.desktop";
+  pinnedLaunchers = { "27" = "ghostty.desktop"; "82" = "warp.desktop"; "34" = "grok-bot.desktop"; "65" = "chatgpt.desktop";
                       "66" = "t3code.desktop"; "70" = "slack.desktop";
                       "72" = "whatsapp.desktop"; "80" = "deepseek-harness.desktop";
                       "76" = "google-chrome.desktop";
                       "78" = "steam.desktop"; }
-    // lib.optionalAttrs dual { "56" = "ghostty.desktop"; "57" = "grok-bot.desktop";
+    // lib.optionalAttrs dual { "56" = "ghostty.desktop"; "83" = "warp.desktop"; "57" = "grok-bot.desktop";
                                "67" = "chatgpt.desktop"; "68" = "t3code.desktop"; "71" = "slack.desktop";
                                "73" = "whatsapp.desktop"; "81" = "deepseek-harness.desktop";
                                "77" = "google-chrome.desktop";
@@ -188,13 +202,13 @@ let
   }) pinnedLaunchers);
 in
 {
-  # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + DeepSeek Harness + Chrome + Steam on the left,
+  # Top menu bar: workspace numbers, Ghostty + Warp + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + DeepSeek Harness + Chrome + Steam on the left,
   # tray/volume/search/control centre/clock on the right. Its ends line up with i3's
   # window gaps (end spacers + gtk.css padding).
   xfconf.settings.xfce4-panel = {
     "panels" = if dual then [ 1 2 ] else [ 1 ];
     "panels/dark-mode" = true;
-    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 34 65 66 70 72 80 76 78 3 6 21 25 26 8 33 ];
+    "panels/panel-1/plugin-ids" = [ 32 ] ++ wsIds 35 ++ [ 44 27 82 34 65 66 70 72 80 76 78 3 6 21 25 26 8 33 ];
 
     # status area (tray and volume keys exist only once, on the primary bar)
     "plugins/plugin-6" = "systray";
@@ -221,7 +235,7 @@ in
   // wsPlugins 35
   // separator 32 false // separator 33 false   # left/right end spacers
   // separator 44 false                          # gap between workspaces and apps
-  // launcher 27 "ghostty.desktop" // launcher 34 "grok-bot.desktop"
+  // launcher 27 "ghostty.desktop" // launcher 82 "warp.desktop" // launcher 34 "grok-bot.desktop"
   // launcher 65 "chatgpt.desktop" // launcher 66 "t3code.desktop" // launcher 70 "slack.desktop"
   // launcher 72 "whatsapp.desktop" // launcher 80 "deepseek-harness.desktop"
   // launcher 76 "google-chrome.desktop" // launcher 78 "steam.desktop"
@@ -232,7 +246,7 @@ in
     # LG on the left, ASUS on the right: same bar on each, minus the tray
     "panels/panel-1/output-name" = "DP-2";
     "panels/panel-2/output-name" = "DP-4";
-    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 57 67 68 71 73 81 77 79 59 60 61 62 63 64 ];
+    "panels/panel-2/plugin-ids" = [ 45 ] ++ wsIds 46 ++ [ 55 56 83 57 67 68 71 73 81 77 79 59 60 61 62 63 64 ];
     "plugins/plugin-60" = "pulseaudio";
     "plugins/plugin-60/enable-keyboard-shortcuts" = false;  # volume keys are handled once, by plugin-21
   }
@@ -240,7 +254,7 @@ in
   // wsPlugins 46
   // separator 45 false // separator 64 false
   // separator 55 false
-  // launcher 56 "ghostty.desktop" // launcher 57 "grok-bot.desktop"
+  // launcher 56 "ghostty.desktop" // launcher 83 "warp.desktop" // launcher 57 "grok-bot.desktop"
   // launcher 67 "chatgpt.desktop" // launcher 68 "t3code.desktop" // launcher 71 "slack.desktop"
   // launcher 73 "whatsapp.desktop" // launcher 81 "deepseek-harness.desktop"
   // launcher 77 "google-chrome.desktop" // launcher 79 "steam.desktop"
@@ -278,7 +292,6 @@ in
     };
     Service = {
       Environment = [
-        "DISPLAY=:0"
         "XDG_DATA_DIRS=%h/.nix-profile/share:/usr/local/share:/usr/share"
       ];
       ExecStart = "${menubarPopovers}";

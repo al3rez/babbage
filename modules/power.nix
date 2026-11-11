@@ -21,7 +21,6 @@
     };
     Service = {
       Type = "oneshot";
-      Environment = [ "DISPLAY=:0" ];
       ExecStart = "${pkgs.xset}/bin/xset s off";
       RemainAfterExit = true;
       Restart = "on-failure";
