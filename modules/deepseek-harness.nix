@@ -26,6 +26,11 @@ let
     exec ${desk.chromium}/bin/chromium --user-data-dir="$HOME/.local/share/deepseek-harness-app" \
       --class=DeepSeek --no-first-run --no-default-browser-check --app="$url"
   '';
+
+  # the Token Plan's model list, kept current from its own /models (files/bin/dsh-models-sync)
+  modelsSync = pkgs.writeScript "dsh-models-sync"
+    (builtins.replaceStrings [ "#!@python@" ] [ "#!${pkgs.python3}/bin/python3" ]
+      (builtins.readFile ../files/bin/dsh-models-sync));
 in
 {
   systemd.user.services.dsh-web = {
@@ -39,6 +44,25 @@ in
       Restart = "on-failure";
       RestartSec = "3";
     };
+  };
+
+  systemd.user.services.dsh-models-sync = {
+    Unit.Description = "Update DeepSeek Harness's Alibaba Cloud Model Studio model list";
+    Service = {
+      Type = "oneshot";
+      EnvironmentFile = "-%h/.config/dsh/bailian.env";
+      ExecStart = "${modelsSync}";
+    };
+  };
+  systemd.user.timers.dsh-models-sync = {
+    Unit.Description = "Update DeepSeek Harness's model list daily";
+    Timer = {
+      OnStartupSec = "2min";
+      OnCalendar = "daily";
+      RandomizedDelaySec = "1h";
+      Persistent = true;
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   xdg.dataFile."applications/deepseek-harness.desktop".text = ''

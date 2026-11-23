@@ -1,0 +1,99 @@
+#!@python@
+"""Keep DeepSeek Harness's Alibaba Cloud Model Studio model list current.
+
+Asks the Token Plan endpoint which models the key can use (GET /models) and rewrites the
+`models:` list of the bailian-tpp provider in ~/.dsh/profiles/web/cordis.patch.yml to match:
+every chat model, newest first within each family (DeepSeek, auto, Qwen, GLM, then anything
+else). Audio, image and video models are left out: the harness only chats. Nothing else in the
+file is touched (the Web UI edits it too). When the list changed, dsh-web is restarted so the
+model picker shows it, unless a session was written in the last 10 minutes (a run in progress
+would be cut off); then the list takes effect at its next start. Runs from the dsh-models-sync
+user timer: daily, and shortly after login.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+PATCH = os.path.expanduser("~/.dsh/profiles/web/cordis.patch.yml")
+SESSIONS = os.path.expanduser("~/.dsh/sessions")
+NOT_CHAT = re.compile(r"audio|image|video|tts|asr|realtime|embed|rerank|^wan", re.I)
+FAMILIES = ("deepseek", "auto", "qwen", "glm")
+QUIET_FOR = 600   # seconds since the last session write before restarting dsh-web
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def provider_block(text):
+    """(start, end, indent, baseURL) of the bailian-tpp models list items."""
+    m = re.search(r"^\s*bailian-tpp:\n", text, re.M)
+    if not m:
+        sys.exit("no bailian-tpp provider in " + PATCH)
+    base = re.compile(r"^\s*baseURL:\s*(\S+)", re.M).search(text, m.end()).group(1)
+    models = re.compile(r"^\s*models:\n", re.M).search(text, m.end())
+    items = re.compile(r"(?:[ \t]+- id: .*\n)+").match(text, models.end())
+    indent = re.match(r"[ \t]*", items.group(0)).group(0)
+    return items.start(), items.end(), indent, base
+
+
+def order(ids):
+    def key(i):
+        fam = next((n for n, f in enumerate(FAMILIES) if i.startswith(f)), len(FAMILIES))
+        name = re.sub(r"-\d{4}$", "", i)            # dated snapshot -> its model
+        nums = [int(n) for n in re.findall(r"\d+", name)][:4]
+        newest_first = [-n for n in nums + [0] * (4 - len(nums))]   # v4.1 before v4
+        # each model, then its dated snapshots (deepseek-v4-pro, deepseek-v4-pro-0813)
+        return (fam, newest_first, name, i)
+    return sorted(ids, key=key)
+
+
+def dsh_recently_used():
+    newest = 0.0
+    for root, _, files in os.walk(SESSIONS):
+        for f in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(root, f)))
+            except OSError:
+                pass
+    return time.time() - newest < QUIET_FOR
+
+
+def main():
+    key = os.environ.get("BAILIAN_API_KEY")
+    if not key:
+        sys.exit("BAILIAN_API_KEY not set (~/.config/dsh/bailian.env)")
+    text = open(PATCH).read()
+    start, end, indent, base = provider_block(text)
+    req = urllib.request.Request(base.rstrip("/") + "/models", headers={"Authorization": "Bearer " + key})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        ids = [m["id"] for m in json.load(r)["data"]]
+    ids = order(i for i in ids if not NOT_CHAT.search(i))
+    if not ids:
+        sys.exit("the endpoint listed no chat models; leaving the list alone")
+    old = re.findall(r"- id: (\S+)", text[start:end])
+    if ids == old:
+        log(f"up to date: {len(ids)} models")
+        return
+    added, gone = [i for i in ids if i not in old], [i for i in old if i not in ids]
+    tmp = PATCH + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text[:start] + "".join(f"{indent}- id: {i}\n" for i in ids) + text[end:])
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, PATCH)
+    log(f"models updated: added {added}, removed {gone}")
+    if subprocess.run(["systemctl", "--user", "is-active", "-q", "dsh-web"]).returncode != 0:
+        return
+    if dsh_recently_used():
+        log("DeepSeek Harness is in use; the new list applies at its next start")
+    else:
+        subprocess.run(["systemctl", "--user", "restart", "dsh-web"])
+        log("restarted dsh-web")
+
+
+if __name__ == "__main__":
+    main()

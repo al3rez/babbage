@@ -6,7 +6,7 @@
 { stdenvNoCC, fetchurl, writeShellScriptBin }:
 
 let
-  version = "0.2.2-rc.1";
+  version = "0.2.2-rc.5";   # npm "latest"; check: npm view @deepseek-ai/dsh dist-tags
   node = stdenvNoCC.mkDerivation rec {
     pname = "nodejs-official";
     version = "24.21.0";
