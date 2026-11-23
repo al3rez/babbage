@@ -10,8 +10,10 @@ menu, and opens one popover style for all of them:
     exit node, admin console. (`tailscale systray` draws a fixed bitmap that can't match.)
   * 1Password: a white glyph of its mark, and Open / Quick Access / Lock. Its own tray icon is a
     fixed full-colour bitmap, hidden in the tray (modules/panel.nix hidden-items).
-  * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi, Hex): a stand-in icon mirroring
-    the app's own icon; the original is hidden in the tray (modules/panel.nix hidden-items).
+  * Every other app's tray icon (PROXIED by name: Telegram, Bluetooth, Wi-Fi, Hex; any other app,
+    e.g. Sunshine): a stand-in icon, our glyph or the app's own icon as a flat white silhouette
+    like the others; the original is hidden in the tray (modules/panel.nix hidden-items, plus
+    the Ids added here for apps not listed there).
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
     submenus expand in place, disabled items greyed; choosing an item sends the click back.
 
@@ -65,8 +67,12 @@ POLL = 5          # seconds between Tailscale status checks
 BAR = 36          # menu bar height (px)
 WIDTH_PT = 340    # popover width in points (macOS popovers are ~300-340pt)
 
-# tray Id -> stand-in title (tooltip fallback)
+# tray Id -> stand-in title (tooltip fallback). Any other app's tray icon gets a stand-in too,
+# titled after the app, except these, which stay hidden with none (modules/panel.nix
+# hidden-items): full-colour Electron icons, and 1Password, which has its own item here
 PROXIED = {"nm-applet": "Wi-Fi", "TelegramDesktop": "Telegram", "blueman": "Bluetooth", "hex": "Hex"}
+UNPROXIED = {"Slack_status_icon_1", "chrome_status_icon_1", "1Password_status_icon_1"}
+WHITE = 64       # px of the flat white glyphs made from other apps' icons
 
 WATCHER = ("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
 SNI = "org.kde.StatusNotifierItem"
@@ -122,6 +128,52 @@ def run(*cmd, then=None):
 
 def device_icon(os_name):
     return "device-phone.svg" if os_name in ("iOS", "android") else "device-laptop.svg"
+
+
+def xfconf_strings(prop, values=None):
+    """Read (or, with values, write) a string array of xfce4-panel."""
+    args = [XFCONF, "-c", "xfce4-panel", "-p", prop]
+    if values is not None:
+        args += [a for v in values for a in ("-t", "string", "-s", v)]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    # "Value is an array with N items:", a blank line, then one value per line
+    return [line.strip() for line in out.splitlines()[2:] if line.strip()]
+
+
+def white_glyph(pb):
+    """An app's tray icon as a flat white glyph, like the other tray icons: its shape (alpha) in
+    white. An icon drawn on an opaque tile (its shape fills the square) keeps its bright parts
+    instead. Returns SNI IconPixmap data: [(w, h, ARGB32 in network byte order)]."""
+    if not pb.get_has_alpha():
+        pb = pb.add_alpha(False, 0, 0, 0)
+    w, h = pb.get_width(), pb.get_height()
+    if max(w, h) != WHITE:
+        k = WHITE / max(w, h)
+        w, h = max(1, round(w * k)), max(1, round(h * k))
+        pb = pb.scale_simple(w, h, GdkPixbuf.InterpType.HYPER)
+    rs, px = pb.get_rowstride(), pb.get_pixels()
+    pixels = [px[y * rs + x * 4: y * rs + x * 4 + 4] for y in range(h) for x in range(w)]
+    tile = sum(p[3] > 200 for p in pixels) / len(pixels) > 0.8
+    out = bytearray()
+    for r, g, b, a in pixels:
+        v = a * (r * 299 + g * 587 + b * 114) // 255000 if tile else a
+        out += bytes((v, 255, 255, 255))
+    return [(w, h, bytes(out))]
+
+
+def pixbuf_from_sni(pixmaps):
+    """The largest of an SNI IconPixmap's bitmaps (ARGB32, network byte order) as a pixbuf."""
+    if not pixmaps:
+        return None
+    w, h, data = max(pixmaps, key=lambda p: p[0] * p[1])
+    data = bytes(data)
+    rgba = bytearray(len(data))
+    rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = data[1::4], data[2::4], data[3::4], data[0::4]
+    return GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(rgba)), GdkPixbuf.Colorspace.RGB,
+                                           True, 8, w, h, w * 4)
 
 
 def file_image(name, size):
@@ -477,14 +529,18 @@ class ClipboardItem(TrayItem):
 
 
 class ProxyItem(TrayItem):
-    """Stands in for an app's tray icon: same icon, our popover with the app's menu."""
+    """Stands in for an app's tray icon: our glyph, or the app's icon as a flat white glyph, and
+    our popover with the app's menu."""
 
     def __init__(self, app, service, original_id):
-        self.title = PROXIED[original_id]
+        self.generic = original_id not in PROXIED   # an app with no glyph of ours
+        self.title = PROXIED.get(original_id, original_id)
+        self.slug = "".join(c if c.isalnum() else "_" for c in original_id)
+        self.white_key = self.white = None
         self.orig = {}
         self.open_subs = set()
         self.service = self.sub = None
-        super().__init__(app, f"/menubar/{original_id.replace('-', '_')}")
+        super().__init__(app, f"/menubar/{self.slug}")
         self.retarget(service)
 
     def retarget(self, service):
@@ -511,6 +567,8 @@ class ProxyItem(TrayItem):
                                          "GetAll", GLib.Variant("(s)", (SNI,)), None,
                                          Gio.DBusCallFlags.NONE, 2000, None)
             self.orig = res.unpack()[0]
+            if self.generic and self.orig.get("Title"):
+                self.title = self.orig["Title"]
         except GLib.Error:
             pass
 
@@ -518,11 +576,41 @@ class ProxyItem(TrayItem):
         self.reload()
         self.emit(signal, params if signal == "NewStatus" else None)
 
+    def white_icon(self, o):
+        """(IconName, IconThemePath, IconPixmap) for an app with no glyph of ours: its symbolic
+        icon if the theme has one (the tray draws those white), else its icon made flat white."""
+        name, path = o.get("IconName", ""), o.get("IconThemePath", "")
+        theme = Gtk.IconTheme.get_default()
+        if name and not name.endswith("-symbolic") and theme.has_icon(name + "-symbolic"):
+            name += "-symbolic"
+        if name.endswith("-symbolic"):
+            return (*glyph(name, (name, path)), [])
+        pixmaps = o.get("IconPixmap", [])
+        key = (name, path, hash(b"".join(bytes(p[2]) for p in pixmaps)))
+        if key != self.white_key:
+            pb = None
+            files = [os.path.join(path, f"{name}.{ext}") for ext in ("svg", "png", "xpm")] if name and path else []
+            try:
+                if any(os.path.exists(f) for f in files):
+                    f = next(f for f in files if os.path.exists(f))
+                    pb = GdkPixbuf.Pixbuf.new_from_file_at_size(f, WHITE, WHITE)
+                elif name and theme.has_icon(name):
+                    pb = theme.load_icon(name, WHITE, Gtk.IconLookupFlags.FORCE_SIZE)
+                else:
+                    pb = pixbuf_from_sni(pixmaps)
+            except GLib.Error:
+                pb = pixbuf_from_sni(pixmaps)
+            self.white_key, self.white = key, white_glyph(pb) if pb else []
+        return "", "", self.white
+
     def props(self):
         o = self.orig
         tip = o.get("ToolTip") or ("", [], "", "")
         icon, theme_path = o.get("IconName", ""), o.get("IconThemePath", "")
-        if icon.startswith("nm-signal-"):
+        pixmap = [] if self.title == "Hex" else o.get("IconPixmap", [])
+        if self.generic:
+            icon, theme_path, pixmap = self.white_icon(o)
+        elif icon.startswith("nm-signal-"):
             # Wi-Fi strength: our own glyph (files/icons/tailscale/menubar-wifi-N). The theme's
             # is filled shapes on a 16px grid whose seams turn jagged at bar size.
             pct = int("".join(ch for ch in icon[len("nm-signal-"):] if ch.isdigit()) or 0)
@@ -532,16 +620,16 @@ class ProxyItem(TrayItem):
             icon, theme_path = glyph("menubar-hex")
         elif icon and not icon.endswith("-symbolic") and Gtk.IconTheme.get_default().has_icon(icon + "-symbolic"):
             icon += "-symbolic"   # symbolic variants render like the other tray glyphs
-        if icon and not icon.startswith("menubar-"):
+        if icon and not icon.startswith("menubar-") and not self.generic:
             icon, theme_path = glyph(icon, (icon, theme_path))   # a theme icon bar-icons resized
         return {
             "Category": GLib.Variant("s", o.get("Category", "ApplicationStatus")),
-            "Id": GLib.Variant("s", f"menubar-{self.title.lower()}"),
+            "Id": GLib.Variant("s", f"menubar-{self.slug.lower() if self.generic else self.title.lower()}"),
             "Title": GLib.Variant("s", self.title),
             "Status": GLib.Variant("s", o.get("Status", "Passive") if o else "Passive"),
             "IconName": GLib.Variant("s", icon),
             "IconThemePath": GLib.Variant("s", theme_path),
-            "IconPixmap": GLib.Variant("a(iiay)", [] if self.title == "Hex" else o.get("IconPixmap", [])),
+            "IconPixmap": GLib.Variant("a(iiay)", pixmap),
             "ItemIsMenu": GLib.Variant("b", False),
             "ToolTip": GLib.Variant("(sa(iiay)ss)", (tip[0], tip[1], tip[2] or self.title, tip[3])),
         }
@@ -813,6 +901,29 @@ class App:
         self.resized = Gio.File.new_for_path(RESIZED).monitor_directory(Gio.FileMonitorFlags.NONE, None)
         self.resized.connect("changed", lambda *_: self.icons_changed())
         self.icons_pending = False
+        # apps we stand in for that modules/panel.nix doesn't list: their own icons stay hidden,
+        # also after something (a Home Manager switch) rewrites hidden-items
+        self.hide = set()
+        self.bus.signal_subscribe("org.xfce.Xfconf", "org.xfce.Xfconf", "PropertyChanged", "/org/xfce/Xfconf",
+                                  "xfce4-panel", Gio.DBusSignalFlags.NONE,
+                                  lambda *a: a[5][1].endswith("/hidden-items") and self.hide_originals())
+
+    def hide_originals(self):
+        """Add the Ids in self.hide to every tray's hidden-items that lacks one."""
+        if not self.hide:
+            return False
+        for ids in panel_plugin_ids():
+            for i in ids:
+                kind = subprocess.run([XFCONF, "-c", "xfce4-panel", "-p", f"/plugins/plugin-{i}"],
+                                      capture_output=True, text=True).stdout.strip()
+                if kind != "systray":
+                    continue
+                prop = f"/plugins/plugin-{i}/hidden-items"
+                names = xfconf_strings(prop)
+                missing = sorted(self.hide - set(names))
+                if missing:
+                    xfconf_strings(prop, names + missing)
+        return False
 
     def icons_changed(self):
         if not self.icons_pending:
@@ -873,8 +984,11 @@ class App:
             item_id = res.unpack()[0]
         except GLib.Error:
             return
-        if item_id not in PROXIED:
+        if item_id in UNPROXIED or item_id.startswith("menubar-"):
             return
+        if item_id not in PROXIED and item_id not in self.hide:
+            self.hide.add(item_id)
+            self.hide_originals()
         if item_id in self.proxies:
             if self.proxies[item_id].service != service:
                 self.proxies[item_id].retarget(service)
