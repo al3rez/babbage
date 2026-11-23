@@ -50,7 +50,6 @@ in
     Unit.Description = "Update DeepSeek Harness's Alibaba Cloud Model Studio model list";
     Service = {
       Type = "oneshot";
-      EnvironmentFile = "-%h/.config/dsh/bailian.env";
       ExecStart = "${modelsSync}";
     };
   };
