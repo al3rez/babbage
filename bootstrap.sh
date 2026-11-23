@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-shot setup on a fresh Debian 13 (trixie):
-#   ./bootstrap.sh            # this machine (NVIDIA)
-#   ./bootstrap.sh al3rez-vm  # anything else (Mesa GL, no NVIDIA monitor layout)
+#   ./bootstrap.sh            # the al3rez desk (NVIDIA, LG + ASUS, Bangkok)
+#   ./bootstrap.sh generic    # anything else, any user (Mesa GL, no NVIDIA monitor layout)
 set -euo pipefail
 
 profile="${1:-al3rez}"
@@ -41,12 +41,14 @@ Signed-By: /usr/share/keyrings/1password-archive-keyring.gpg
 EOF
 sudo install -Dm644 "$here/files/apt/1password.pol" /etc/debsig/policies/AC2D62742012EA22/1password.pol
 sudo install -Dm644 "$here/files/apt/1password.gpg" /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
-# Debian's Thailand mirror: ~2x deb.debian.org from Bangkok (measured); security stays upstream
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/mirrors/debian.list; do
-  [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
-done
+if [ "$profile" = "al3rez" ]; then
+  # Debian's Thailand mirror: ~2x deb.debian.org from Bangkok (measured); security stays upstream
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/mirrors/debian.list; do
+    [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
+  done
+  sudo timedatectl set-timezone Asia/Bangkok
+fi
 sudo apt-get update
-sudo timedatectl set-timezone Asia/Bangkok
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \
@@ -90,7 +92,7 @@ fi
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 
 # 3. Everything else: i3, picom, dunst, Ghostty, Telegram, fonts, icons, wallpaper, xfconf
-nix run home-manager/master -- switch -b backup --flake "$here#$profile"
+nix run home-manager/master -- switch -b backup --impure --flake "$here#$profile"
 # OpenRGB's udev rules (from the profile it just installed): RAM SMBus + RGB controllers for
 # the logged-in user, so the rgb-off service can turn the lighting off (modules/rgb.nix; this
 # machine's profile only)

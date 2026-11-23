@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nixgl, nixglhost, gpu, hex, ... }:
+{ config, lib, pkgs, nixgl, nixglhost, gpu, hex, user, ... }:
 
 let
   # NVIDIA: run GL apps against the host's own driver libraries (nix-gl-host), so they always
@@ -40,8 +40,8 @@ in
     ./modules/hex.nix
   ];
 
-  home.username = "al3rez";
-  home.homeDirectory = "/home/al3rez";
+  home.username = user;
+  home.homeDirectory = "/home/${user}";
   home.stateVersion = "25.05";
   programs.home-manager.enable = true;
   news.display = "silent";   # no "N unread news items" after every switch

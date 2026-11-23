@@ -30,16 +30,20 @@
         inherit system;
         config.allowUnfree = true;
       };
+      # Any user: whoever runs the switch (needs --impure; bootstrap.sh passes it). The ISO's
+      # installer lets you pick the name, as Omarchy's does.
+      user = let u = builtins.getEnv "USER"; in
+        if u == "" then throw "Babbage reads your username from $USER: add --impure to home-manager switch" else u;
       mkHome = gpu: home-manager.lib.homeManagerConfiguration {
         inherit pkgs;
-        extraSpecialArgs = { inherit nixgl gpu hex; nixglhost = nix-gl-host.packages.${system}.default; };
+        extraSpecialArgs = { inherit nixgl gpu hex user; nixglhost = nix-gl-host.packages.${system}.default; };
         modules = [ ./home.nix ];
       };
     in
     {
       # this machine: NVIDIA RTX 5070, LG 4K + ASUS layout
       homeConfigurations.al3rez = mkHome "nvidia";
-      # any other box / VM: Mesa GL, no NVIDIA monitor layout
-      homeConfigurations.al3rez-vm = mkHome "mesa";
+      # any other box / VM (and the ISO): Mesa GL, no NVIDIA monitor layout
+      homeConfigurations.generic = mkHome "mesa";
     };
 }
