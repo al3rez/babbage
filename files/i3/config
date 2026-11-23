@@ -28,6 +28,8 @@ for_window [window_type="dialog"] floating enable
 for_window [window_type="menu"] floating enable
 # Clipboard History (Super+Shift+V): a floating window that places itself where rofi would
 for_window [class="Clipboard-history"] floating enable, border none
+# 1Password Quick Access (Ctrl+Shift+Space) floats like a search box, not a tiled window
+for_window [class="com.onepassword.OnePassword" title="^Quick Access"] floating enable, border none
 no_focus [class="Xfce4-notifyd"]
 
 # --- startup (layout before wallpaper so the LG never flashes ASUS-only geometry)
@@ -53,6 +55,8 @@ bindsym $mod+Shift+f exec thunar
 bindsym Ctrl+Shift+4 exec --no-startup-id @screenshotregion@
 # clipboard history like Raycast (⌘⇧V there)
 bindsym $mod+Shift+v exec --no-startup-id @clipboard@
+# 1Password Quick Access, its default shortcut on other systems
+bindsym Ctrl+Shift+space exec --no-startup-id /opt/1Password/1password --quick-access
 bindsym $mod+q kill
 
 # --- focus / move (arrows and vim keys)

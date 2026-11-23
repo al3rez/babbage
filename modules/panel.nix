@@ -214,15 +214,18 @@ in
     "plugins/plugin-6" = "systray";
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
-    # Electron apps (ChatGPT, Slack) put a fixed full-colour bitmap in the tray that can't be themed
-    # like the white glyphs; they're pinned on the bar anyway. Wi-Fi, Telegram, Bluetooth and Hex
-    # are shown by files/bin/menubar-popovers' stand-ins instead (their popovers).
-    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "nm-applet" "TelegramDesktop" "blueman" "hex" ];
+    # Electron apps (ChatGPT, Slack, 1Password) put a fixed full-colour bitmap in the tray that
+    # can't be themed like the white glyphs; they open from the bar, the launcher or a shortcut
+    # instead. Wi-Fi, Telegram, Bluetooth and Hex are shown by files/bin/menubar-popovers'
+    # stand-ins instead (their popovers).
+    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "1Password_status_icon_1"
+                                        "nm-applet" "TelegramDesktop" "blueman" "hex" ];
     # tray order (the tray lists items in this order and puts new ones first): Hex, Wi-Fi,
     # Bluetooth, Telegram, Tailscale
     "plugins/plugin-6/known-items" = [ "menubar-hex" "menubar-wi-fi" "menubar-bluetooth" "menubar-telegram"
                                        "tailscale" "hex" "steam" "ZapZap" "Slack_status_icon_1"
-                                       "nm-applet" "chrome_status_icon_1" "TelegramDesktop" "blueman" ];
+                                       "nm-applet" "chrome_status_icon_1" "TelegramDesktop" "blueman"
+                                       "1Password_status_icon_1" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 
@@ -271,6 +274,16 @@ in
       Type=Application
       Name=Network
       Exec=nm-applet --indicator
+      NoDisplay=true
+      X-GNOME-Autostart-enabled=true
+    '';
+    # 1Password (Debian package from 1Password's repo, bootstrap.sh) unlocks with the session and
+    # waits in the background, so the browser extension, `op` and Quick Access work right away
+    "autostart/1password.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=1Password
+      Exec=/opt/1Password/1password --silent
       NoDisplay=true
       X-GNOME-Autostart-enabled=true
     '';

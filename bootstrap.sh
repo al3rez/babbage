@@ -27,6 +27,20 @@ Suites: trixie
 Components: main
 Signed-By: /usr/share/keyrings/tailscale-archive-keyring.gpg
 EOF
+# 1Password from its own repo (native app + `op` CLI; it updates through apt). Key fingerprint
+# 3FEF 9748 469A DBE1 5DA7 CA80 AC2D 6274 2012 EA22, as published by 1Password. The debsig
+# policy makes dpkg check the packages' own signature too, as 1Password's instructions do.
+sudo install -Dm644 "$here/files/apt/1password.gpg" /usr/share/keyrings/1password-archive-keyring.gpg
+sudo tee /etc/apt/sources.list.d/1password.sources >/dev/null <<'EOF'
+Types: deb
+URIs: https://downloads.1password.com/linux/debian/amd64
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /usr/share/keyrings/1password-archive-keyring.gpg
+EOF
+sudo install -Dm644 "$here/files/apt/1password.pol" /etc/debsig/policies/AC2D62742012EA22/1password.pol
+sudo install -Dm644 "$here/files/apt/1password.gpg" /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
 # Debian's Thailand mirror: ~2x deb.debian.org from Bangkok (measured); security stays upstream
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/mirrors/debian.list; do
   [ -f "$f" ] && sudo sed -Ei 's#https?://deb\.debian\.org/debian(/?)( |$)#http://ftp.th.debian.org/debian\1\2#' "$f"
@@ -36,7 +50,7 @@ sudo timedatectl set-timezone Asia/Bangkok
 sudo apt-get install -y \
   curl xz-utils dbus-x11 xfconf \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \
-  blueman network-manager-gnome tailscale
+  blueman network-manager-gnome tailscale 1password 1password-cli
 if [ "$profile" = "al3rez" ]; then
   # linux-headers-amd64 follows every kernel update, so DKMS can build the NVIDIA driver for
   # it; without it a new kernel boots with no driver and a black screen. The apt hook checks
