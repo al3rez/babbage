@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Builds the ISO without root on this machine: boots Debian 13's official cloud image in
+# QEMU/KVM, runs iso/build inside it as root and copies the ISO back to iso/out/.
+#   iso/build-in-vm           # build, then power the VM off
+#   KEEP=1 iso/build-in-vm    # leave the builder running; the next run reuses it (faster)
+# Needs qemu-system-x86_64, qemu-img, read/write access to /dev/kvm, curl, ssh and python3.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(dirname "$here")"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/babbage-iso"
+base="$cache/debian-13-genericcloud-amd64.qcow2"
+disk="$cache/builder.qcow2"
+pidfile="$cache/builder.pid"
+port=2222
+mkdir -p "$cache" "$here/out"
+
+ssh_vm() { ssh -q -i "$cache/id_ed25519" -p "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 debian@127.0.0.1 "$@"; }
+
+if ! { [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; }; then
+  [ -f "$base" ] || {
+    curl -fL -o "$base.part" https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    mv "$base.part" "$base"
+  }
+  [ -f "$cache/id_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C babbage-builder -f "$cache/id_ed25519"
+  # a fresh copy-on-write disk each boot; the image itself stays untouched
+  rm -f "$disk"
+  qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$disk" 60G
+
+  # cloud-init NoCloud seed, served over HTTP (QEMU's user network reaches the host as 10.0.2.2)
+  seed="$cache/seed"; mkdir -p "$seed"
+  echo "instance-id: babbage-builder-$(date +%s)" >"$seed/meta-data"
+  printf '#cloud-config\nssh_authorized_keys:\n  - %s\n' "$(cat "$cache/id_ed25519.pub")" >"$seed/user-data"
+  : >"$seed/vendor-data"
+  http_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+  python3 -m http.server -b 127.0.0.1 -d "$seed" "$http_port" >/dev/null 2>&1 &
+  http_pid=$!
+  trap 'kill $http_pid 2>/dev/null || true' EXIT
+
+  qemu-system-x86_64 -enable-kvm -cpu host -smp "$(nproc)" -m 8G \
+    -drive file="$disk",if=virtio \
+    -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$port-:22 \
+    -smbios "type=1,serial=ds=nocloud;s=http://10.0.2.2:$http_port/" \
+    -display none -serial file:"$cache/builder-console.log" \
+    -daemonize -pidfile "$pidfile"
+
+  echo "Waiting for the builder VM to boot..."
+  for _ in $(seq 120); do ssh_vm true 2>/dev/null && break; sleep 2; done
+  ssh_vm true || { echo "builder VM never answered on SSH; see $cache/builder-console.log" >&2; exit 1; }
+  ssh_vm cloud-init status --wait >/dev/null || true
+fi
+
+# the repo as it is now (committed or not), minus build output and anything git ignores;
+# iso/build clones its HEAD for the installed system
+ssh_vm 'rm -rf src && mkdir src'
+git -C "$repo" ls-files -co --exclude-standard -z |
+  tar -C "$repo" --null -T - -cf - .git | ssh_vm 'tar -C src -xf -'
+ssh_vm 'sudo OUT=/home/debian/out src/iso/build'
+iso=$(ssh_vm 'ls -t out/*.iso | head -1')
+scp -q -i "$cache/id_ed25519" -P "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "debian@127.0.0.1:$iso" "debian@127.0.0.1:$iso.sha256" "$here/out/"
+
+if [ "${KEEP:-0}" != 1 ]; then
+  ssh_vm 'sudo poweroff' || true
+  rm -f "$pidfile"
+fi
+echo "Built $here/out/$(basename "$iso")"

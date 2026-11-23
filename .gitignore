@@ -2,6 +2,7 @@ result
 result-*
 *.backup
 __pycache__/
+iso/out/
 # secrets never belong here: keys live in ~/.config/dsh/bailian.env and similar, outside the repo
 *.env
 .env*

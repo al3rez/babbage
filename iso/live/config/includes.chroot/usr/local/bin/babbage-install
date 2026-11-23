@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# Babbage installer, on the live ISO's first console. Like Omarchy's configurator: a few
+# questions (keyboard, name, user, password, hostname, timezone, disk, encryption), then it
+# writes the prebuilt Debian 13 + XFCE system on the ISO (babbage/rootfs.tar.zst) to the
+# disk, inside LUKS2 unless you say no, and makes it boot. No network needed; the first
+# login on the new system finishes Babbage (bootstrap.sh) over the internet.
+#
+# Unattended: put install.conf on a volume labelled BABBAGECFG. Its shell variables
+# answer every question and skip the confirmation:
+#   FULLNAME USERNAME PASSWORD HOSTNAME TIMEZONE KEYBOARD DISK ENCRYPT=yes|no
+#   CMDLINE (extra kernel arguments)  FINISH=reboot|poweroff
+set -euo pipefail
+
+# Mount in a namespace of our own. Otherwise systemd-udevd (in its own mount namespace) gets
+# copies of the target's mounts that umount can't reach, and the encrypted disk stays busy.
+[ -n "${BABBAGE_PRIVATE_MOUNTS:-}" ] || exec env BABBAGE_PRIVATE_MOUNTS=1 unshare --mount --propagation private "$0" "$@"
+
+image=/run/live/medium/babbage/rootfs.tar.zst
+log=/var/log/babbage-install.log
+target=/mnt/babbage
+mapper=babbage-root
+
+title() { gum style --bold --foreground 12 "$@"; }
+note() { gum style --foreground 8 "$@"; }
+fail() { gum style --foreground 9 --bold "$1"; exit 1; }
+
+[ -d /sys/firmware/efi ] || fail "Babbage installs on UEFI machines only: reboot, pick the UEFI entry for this USB stick in the boot menu, and turn Secure Boot off."
+[ -f "$image" ] || fail "The system image is missing from the ISO ($image)."
+
+# Big console font on big screens (4K at 8x16 is unreadable)
+width=$(cut -d, -f1 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 0)
+[ "$width" -lt 2560 ] || setfont /usr/share/consolefonts/Uni2-Terminus32x16.psf.gz 2>/dev/null || true
+
+# The disk the ISO itself is on can't be the target
+live_disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /run/live/medium)" 2>/dev/null || true)
+[ -n "$live_disk" ] || live_disk=$(basename "$(findmnt -no SOURCE /run/live/medium)")
+
+# Unattended answers
+unattended=no
+cfg=$(blkid -L BABBAGECFG 2>/dev/null || true)
+if [ -n "$cfg" ]; then
+  mkdir -p /run/babbage-cfg
+  mount -o ro "$cfg" /run/babbage-cfg
+  # shellcheck disable=SC1091
+  . /run/babbage-cfg/install.conf
+  umount /run/babbage-cfg
+  unattended=yes
+fi
+
+valid_user() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && ! getent passwd "$1" >/dev/null; }
+valid_host() { [[ $1 =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; }
+
+disks() {
+  lsblk -dpno NAME,SIZE,TYPE,RO,MODEL | while read -r name size type ro model; do
+    [ "$type" = disk ] && [ "$ro" = 0 ] || continue
+    case "$name" in /dev/zram*|/dev/loop*|"/dev/$live_disk") continue ;; esac
+    [ -n "$cfg" ] && [ "$name" = "/dev/$(lsblk -no PKNAME "$cfg")" ] && continue
+    printf '%-16s %8s  %s\n' "$name" "$size" "$model"
+  done
+}
+
+if [ "$unattended" = no ]; then
+  clear
+  title "Babbage" "An opinionated Debian 13 desktop, built with Nix"
+  echo
+
+  KEYBOARD=$(sed -n '/^! layout/,/^ *$/p' /usr/share/X11/xkb/rules/base.lst | tail -n +2 | sed '/^ *$/d;s/^ *//' |
+    gum filter --header "Keyboard layout" --placeholder "Type to search (us, de, fr…)" --value us --height 12 | awk '{print $1}')
+  [ -n "$KEYBOARD" ] || KEYBOARD=us
+  # the password below is typed with this layout, as it is at boot
+  sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$KEYBOARD\"/" /etc/default/keyboard
+  setupcon -k --force >/dev/null 2>&1 || true
+
+  FULLNAME=$(gum input --header "Your full name" --placeholder "Ada Lovelace")
+  while :; do
+    USERNAME=$(gum input --header "Username" --placeholder "lowercase letters, digits, - and _" \
+      --value "$(printf '%s' "${FULLNAME%% *}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')")
+    valid_user "$USERNAME" && break
+    note "That username won't work: start with a letter, then lowercase letters, digits, - or _."
+  done
+  while :; do
+    PASSWORD=$(gum input --password --header "Password (also unlocks the disk)")
+    [ -n "$PASSWORD" ] || { note "The password can't be empty."; continue; }
+    again=$(gum input --password --header "Password again")
+    [ "$PASSWORD" = "$again" ] && break
+    note "The passwords didn't match; try again."
+  done
+  while :; do
+    HOSTNAME=$(gum input --header "Computer name" --value babbage)
+    valid_host "$HOSTNAME" && break
+    note "Letters, digits and - only."
+  done
+  TIMEZONE=$(timedatectl list-timezones | gum filter --header "Timezone" --placeholder "Type your city" --height 12)
+  [ -n "$TIMEZONE" ] || TIMEZONE=UTC
+
+  list=$(disks)
+  [ -n "$list" ] || fail "No disk to install on."
+  DISK=$(printf '%s\n' "$list" | gum choose --header "Install on which disk? Everything on it is erased." | awk '{print $1}')
+  [ -n "$DISK" ] || fail "No disk chosen."
+
+  if gum confirm "Encrypt the disk? (recommended: the password above unlocks it at boot)" --default=true; then
+    ENCRYPT=yes
+  else
+    ENCRYPT=no
+  fi
+
+  echo
+  gum style --border rounded --padding "0 2" \
+    "Name       $FULLNAME" "User       $USERNAME" "Computer   $HOSTNAME" "Timezone   $TIMEZONE" \
+    "Keyboard   $KEYBOARD" "Disk       $DISK (erased)" "Encrypted  $ENCRYPT"
+  gum confirm "Erase $DISK and install Babbage?" --default=false || { note "Nothing was changed. Run babbage-install to start again."; exit 0; }
+fi
+
+: "${FULLNAME:=}" "${CMDLINE:=}" "${FINISH:=reboot}"
+for v in USERNAME PASSWORD HOSTNAME TIMEZONE KEYBOARD DISK ENCRYPT; do
+  [ -n "${!v:-}" ] || fail "install.conf is missing $v"
+done
+valid_user "$USERNAME" || fail "Invalid username: $USERNAME"
+valid_host "$HOSTNAME" || fail "Invalid computer name: $HOSTNAME"
+[ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "Unknown timezone: $TIMEZONE"
+[ -b "$DISK" ] || fail "Not a disk: $DISK"
+[ "$(lsblk -bdno SIZE "$DISK")" -ge $((30 * 1024 * 1024 * 1024)) ] || fail "$DISK is smaller than 30 GB; Babbage needs at least that (Nix and the apps take ~20 GB)."
+
+export USERNAME PASSWORD FULLNAME HOSTNAME TIMEZONE KEYBOARD DISK ENCRYPT CMDLINE image target mapper log
+
+: >"$log"
+step() {
+  local label=$1; shift
+  # ASCII only: the Linux console font has no ✓ or braille spinner glyphs
+  if gum spin --spinner line --title "$label" -- bash -c "set -euo pipefail; $(declare -f "$@"); $* >>$log 2>&1"; then
+    gum style --foreground 10 "  done  $label"
+  else
+    gum style --foreground 9 --bold "  FAILED  $label. The last lines of $log:"
+    tail -n 25 "$log"
+    if [ "$unattended" = yes ]; then
+      { echo "BABBAGE-INSTALL-FAILED: $label"; tail -n 40 "$log"; } >/dev/ttyS0 2>/dev/null || true
+      systemctl poweroff
+    fi
+    exit 1
+  fi
+}
+
+partition() {
+  umount -R "$target" 2>/dev/null || true
+  cryptsetup close "$mapper" 2>/dev/null || true
+  for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount "$p" 2>/dev/null || true; done
+  wipefs -af "$DISK"
+  sgdisk --zap-all "$DISK"
+  # ESP, /boot (outside LUKS, so GRUB needs no crypto), root
+  sgdisk -n1:0:+512M -t1:ef00 -c1:EFI -n2:0:+1G -t2:8300 -c2:boot -n3:0:0 -t3:8304 -c3:root "$DISK"
+  partprobe "$DISK"
+  udevadm settle
+  mapfile -t parts < <(lsblk -lnpo NAME "$DISK" | tail -n +2)
+  printf '%s\n' "${parts[@]}" >/run/babbage-parts
+  wipefs -af "${parts[@]}"
+  mkfs.fat -F 32 -n EFI "${parts[0]}"
+  mkfs.ext4 -q -F -L boot "${parts[1]}"
+  root=${parts[2]}
+  if [ "$ENCRYPT" = yes ]; then
+    printf '%s' "$PASSWORD" | cryptsetup luksFormat --type luks2 --batch-mode --label babbage --key-file - "$root"
+    printf '%s' "$PASSWORD" | cryptsetup open --key-file - "$root" "$mapper"
+    root=/dev/mapper/$mapper
+  fi
+  mkfs.ext4 -q -F -L babbage "$root"
+  mkdir -p "$target"
+  mount "$root" "$target"
+  mkdir -p "$target/boot"
+  mount "${parts[1]}" "$target/boot"
+  mkdir -p "$target/boot/efi"
+  mount "${parts[0]}" "$target/boot/efi"
+}
+
+unpack() {
+  zstd -dc "$image" | tar -xpf - -C "$target" --numeric-owner --xattrs --xattrs-include='*' --acls
+}
+
+configure() {
+  mapfile -t parts </run/babbage-parts
+  uuid() { blkid -s UUID -o value "$1"; }
+  if [ "$ENCRYPT" = yes ]; then
+    rootdev=/dev/mapper/$mapper
+    echo "$mapper UUID=$(uuid "${parts[2]}") none luks,discard" >"$target/etc/crypttab"
+  else
+    rootdev=${parts[2]}
+  fi
+  cat >"$target/etc/fstab" <<EOF
+UUID=$(uuid "$rootdev")	/	ext4	errors=remount-ro	0	1
+UUID=$(uuid "${parts[1]}")	/boot	ext4	defaults	0	2
+UUID=$(uuid "${parts[0]}")	/boot/efi	vfat	umask=0077	0	1
+EOF
+  echo "$HOSTNAME" >"$target/etc/hostname"
+  printf '127.0.0.1\tlocalhost\n127.0.1.1\t%s\n::1\t\tlocalhost ip6-localhost ip6-loopback\n' "$HOSTNAME" >"$target/etc/hosts"
+  ln -sf "/usr/share/zoneinfo/$TIMEZONE" "$target/etc/localtime"
+  echo "$TIMEZONE" >"$target/etc/timezone"
+  sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$KEYBOARD\"/" "$target/etc/default/keyboard"
+  # the disk password is typed at boot with this layout
+  sed -i 's/^#\?KEYMAP=.*/KEYMAP=y/' "$target/etc/initramfs-tools/initramfs.conf"
+  [ -z "$CMDLINE" ] || echo "GRUB_CMDLINE_LINUX=\"\$GRUB_CMDLINE_LINUX $CMDLINE\"" >"$target/etc/default/grub.d/zz-install.cfg"
+
+  for d in dev proc sys run; do mount --rbind "/$d" "$target/$d"; mount --make-rslave "$target/$d"; done
+  groups=$(for g in cdrom floppy sudo audio dip video plugdev users netdev bluetooth lpadmin scanner; do
+    chroot "$target" getent group "$g" >/dev/null && printf '%s,' "$g"; done)
+  chroot "$target" useradd -m -s /bin/bash -c "$FULLNAME" -G "${groups%,}" "$USERNAME"
+  printf '%s:%s\n' "$USERNAME" "$PASSWORD" | chroot "$target" chpasswd
+  chroot "$target" passwd -q -l root
+  # Babbage itself (a clone of github.com/al3rez/babbage) and the first-login setup
+  home=$target/home/$USERNAME
+  mkdir -p "$home/.config/autostart"
+  cp -a "$target/usr/share/babbage/repo" "$home/.config/home-manager"
+  cp "$target/usr/share/babbage/babbage-setup.desktop" "$home/.config/autostart/"
+  chroot "$target" chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/.config"
+
+  chroot "$target" update-initramfs -u -k all
+  chroot "$target" grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=babbage
+  # and at EFI/BOOT/BOOTX64.EFI, for firmware that forgets boot entries
+  chroot "$target" grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable
+  chroot "$target" update-grub
+}
+
+finish() {
+  install -m 600 "$log" "$target/var/log/babbage-install.log"
+  sync
+  umount -R "$target"
+  [ "$ENCRYPT" = no ] || cryptsetup close "$mapper"
+}
+
+clear
+title "Installing Babbage on $DISK"
+step "Partitioning and formatting" partition
+step "Writing Debian 13 + XFCE" unpack
+step "Setting up $USERNAME, boot and encryption" configure
+step "Finishing" finish
+echo
+title "Done. Babbage finishes setting itself up at your first login (needs internet)."
+
+if [ "$unattended" = yes ]; then
+  systemctl "$FINISH"
+else
+  gum confirm "Remove the USB stick, then reboot?" --affirmative Reboot --negative "Stay here" && systemctl reboot
+fi

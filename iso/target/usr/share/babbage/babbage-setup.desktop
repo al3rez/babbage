@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Finish Babbage setup
+Comment=Runs bootstrap.sh once after installing from the ISO
+Exec=xfce4-terminal --maximize --title "Babbage setup" --command babbage-setup
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Installs the ISO in a QEMU/KVM VM (UEFI) and checks the result. No root needed.
+
+  iso/test [ISO]          unattended install (encrypted), boot it, unlock the disk, check the
+                          system over the serial console, screenshot the login screen
+  iso/test --full [ISO]   then log in at the login screen like a person would: the setup
+                          terminal opens, gets the password, runs bootstrap.sh (needs internet,
+                          10-30 min), logs out; log in again and screenshot the Babbage desktop
+
+ISO defaults to the newest iso/out/*.iso. Screenshots and logs go to iso/out/test/.
+Needs qemu-system-x86_64, qemu-img, /dev/kvm, mke2fs, Pillow, and OVMF (OVMF_CODE/OVMF_VARS,
+Debian's ovmf package, or Nix: nix build nixpkgs#OVMF.fd)."""
+import glob
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from PIL import Image
+
+here = Path(__file__).resolve().parent
+out = here / "out" / "test"
+USER, PASSWORD = "tester", "babbage-test"
+
+args = sys.argv[1:]
+full = "--full" in args
+args = [a for a in args if a != "--full"]
+iso = Path(args[0]) if args else max(here.glob("out/*.iso"), key=os.path.getmtime)
+
+
+def ovmf():
+    code, vars_ = os.environ.get("OVMF_CODE"), os.environ.get("OVMF_VARS")
+    if code and vars_:
+        return code, vars_
+    if os.path.exists("/usr/share/OVMF/OVMF_CODE_4M.fd"):
+        return "/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"
+    fd = subprocess.check_output(["nix", "build", "--no-link", "--print-out-paths", "nixpkgs#OVMF.fd"], text=True).strip()
+    return f"{fd}/FV/OVMF_CODE.fd", f"{fd}/FV/OVMF_VARS.fd"
+
+
+class VM:
+    def __init__(self, tmp, drives, name):
+        self.tmp, self.name = tmp, name
+        self.qmp_path, self.serial_path = f"{tmp}/{name}.qmp", f"{tmp}/{name}.serial"
+        code, _ = ovmf()
+        cmd = ["qemu-system-x86_64", "-enable-kvm", "-machine", "q35", "-cpu", "host", "-smp", "4", "-m", "6G",
+               "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
+               "-drive", f"if=pflash,format=raw,file={tmp}/vars.fd",
+               "-nic", "user,model=virtio-net-pci", "-vga", "virtio", "-display", "none",
+               "-qmp", f"unix:{self.qmp_path},server=on,wait=off",
+               "-serial", f"unix:{self.serial_path},server=on,wait=off", *drives]
+        self.proc = subprocess.Popen(cmd)
+        for _ in range(100):
+            if os.path.exists(self.qmp_path) and os.path.exists(self.serial_path):
+                break
+            time.sleep(0.1)
+        self.qmp = socket.socket(socket.AF_UNIX)
+        self.qmp.connect(self.qmp_path)
+        self.qmp_file = self.qmp.makefile("rw")
+        self.qmp_file.readline()
+        self.cmd("qmp_capabilities")
+        self.serial = socket.socket(socket.AF_UNIX)
+        self.serial.connect(self.serial_path)
+        self.serial.settimeout(1)
+        self.console = b""
+        self.log = open(out / f"{name}-serial.log", "wb")
+
+    def cmd(self, execute, **arguments):
+        self.qmp_file.write(json.dumps({"execute": execute, "arguments": arguments}) + "\n")
+        self.qmp_file.flush()
+        while True:
+            reply = json.loads(self.qmp_file.readline())
+            if "return" in reply or "error" in reply:
+                return reply
+
+    def screenshot(self, name):
+        ppm = f"{self.tmp}/shot.ppm"
+        self.cmd("screendump", filename=ppm)
+        time.sleep(0.5)
+        Image.open(ppm).save(out / f"{name}.png")
+        return out / f"{name}.png"
+
+    def read(self):
+        try:
+            data = self.serial.recv(65536)
+        except socket.timeout:
+            return False
+        if not data:
+            return False
+        self.console += data
+        self.log.write(data)
+        self.log.flush()
+        return True
+
+    def expect(self, text, timeout):
+        start = len(self.console)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if text.encode() in self.console[start:]:
+                return
+            if self.proc.poll() is not None:
+                raise SystemExit(f"{self.name}: VM exited while waiting for {text!r}")
+            self.read()
+        self.screenshot(f"{self.name}-timeout")
+        raise SystemExit(f"{self.name}: no {text!r} within {timeout}s (screenshot and serial log in {out})")
+
+    def send(self, text):
+        self.serial.sendall(text.encode())
+
+    def run(self, command, timeout=120):
+        """Runs a shell command over the serial console; returns its output. The markers are
+        typed split by "" so only the command's output (not its echo) contains them whole."""
+        n = time.time_ns()
+        self.send(f'echo B""{n}; {command}; echo E""{n}\r')
+        self.expect(f"E{n}\r\n", timeout)
+        text = self.console.decode(errors="replace")
+        return text[text.rfind(f"B{n}\r\n") + len(f"B{n}\r\n"):text.rfind(f"E{n}\r\n")].strip()
+
+    def type(self, text):
+        """Types on the VM's keyboard (the screen, not the serial console)."""
+        names = {"-": "minus", " ": "spc", "\n": "ret", ".": "dot", "_": "shift-minus"}
+        for ch in text:
+            key = names.get(ch) or (f"shift-{ch.lower()}" if ch.isupper() else ch)
+            keys = [{"type": "qcode", "data": k} for k in key.split("-")] if key.startswith("shift-") else [{"type": "qcode", "data": key}]
+            self.cmd("send-key", keys=keys)
+            time.sleep(0.05)
+
+    def wait_exit(self, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            self.read()
+            if self.proc.poll() is not None:
+                return
+        self.screenshot(f"{self.name}-timeout")
+        raise SystemExit(f"{self.name}: still running after {timeout}s (screenshot in {out})")
+
+    def stop(self):
+        if self.proc.poll() is None:
+            self.cmd("quit")
+            self.proc.wait(30)
+
+
+def step(text):
+    print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
+
+
+def main():
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    tmp = tempfile.mkdtemp(prefix="babbage-test-")
+    try:
+        shutil.copy(ovmf()[1], f"{tmp}/vars.fd")
+        os.chmod(f"{tmp}/vars.fd", 0o644)
+        subprocess.check_call(["qemu-img", "create", "-q", "-f", "qcow2", f"{tmp}/disk.qcow2", "60G"])
+        cfg = Path(tmp, "cfg")
+        cfg.mkdir()
+        (cfg / "install.conf").write_text(
+            f'FULLNAME="Test User"\nUSERNAME={USER}\nPASSWORD={PASSWORD}\nHOSTNAME=babbage-test\n'
+            "TIMEZONE=Asia/Bangkok\nKEYBOARD=us\nDISK=/dev/vda\nENCRYPT=yes\n"
+            'CMDLINE="console=tty0 console=ttyS0,115200"\nFINISH=poweroff\n')
+        subprocess.check_call(["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "BABBAGECFG", "-d", str(cfg), f"{tmp}/cfg.img", "8M"])
+        disk = ["-drive", f"file={tmp}/disk.qcow2,if=virtio"]
+
+        step(f"Installing {iso.name} (unattended, encrypted)")
+        vm = VM(tmp, disk + ["-drive", f"file={tmp}/cfg.img,if=virtio,format=raw",
+                             "-drive", f"file={iso},media=cdrom,readonly=on"], "install")
+        time.sleep(40)
+        vm.screenshot("install-live")
+        vm.wait_exit(1800)
+        if b"BABBAGE-INSTALL-FAILED" in vm.console:
+            raise SystemExit("The installer failed:\n" + vm.console.decode(errors="replace").split("BABBAGE-INSTALL-FAILED", 1)[1])
+        step("Installed; the VM powered itself off")
+
+        step("Booting the installed system")
+        vm = VM(tmp, disk, "boot")
+        vm.expect("Please unlock disk", 300)
+        time.sleep(1)
+        vm.send(PASSWORD + "\r")
+        step("Disk unlocked")
+        vm.expect("login:", 300)
+        vm.send(USER + "\r")
+        vm.expect("Password:", 30)
+        vm.send(PASSWORD + "\r")
+        vm.expect("$ ", 30)
+        checks = {
+            "system": "systemctl is-system-running --wait",
+            "failed units": "systemctl --failed --no-legend --plain | cut -d' ' -f1 | xargs",
+            "login screen": "systemctl is-active display-manager",
+            "hostname": "hostname",
+            "timezone": "readlink /etc/localtime",
+            "user": "id",
+            "disk": "lsblk -o NAME,FSTYPE,MOUNTPOINTS /dev/vda | tr '\\n' ' '",
+            "babbage repo": "git -C ~/.config/home-manager log -1 --format=%s",
+            "first-login setup": "ls ~/.config/autostart/",
+            "efi boot": "efibootmgr | grep -i babbage",
+        }
+        results = {name: vm.run(command) for name, command in checks.items()}
+        for name, value in results.items():
+            print(f"  {name:18} {value}")
+        time.sleep(20)
+        greeter = vm.screenshot("login-screen")
+        step(f"Login screen: {greeter}")
+
+        if full:
+            step("Logging in at the login screen; the setup terminal runs bootstrap.sh (10-30 min)")
+            vm.type(f"{USER}\n{PASSWORD}\n")  # Debian's greeter asks for the username first
+            time.sleep(40)
+            vm.screenshot("setup-terminal")
+            vm.type(PASSWORD + "\n")  # sudo, in the setup terminal
+            # babbage-setup prints this line when bootstrap.sh succeeds; read its log over serial
+            for _ in range(240):
+                time.sleep(15)
+                tail = vm.run(f"tail -n 3 /home/{USER}/.local/state/babbage-setup.log 2>/dev/null; "
+                              f"test -e /home/{USER}/.config/autostart/babbage-setup.desktop && echo PENDING || echo FINISHED", 60)
+                if "FINISHED" in tail:
+                    break
+            else:
+                vm.screenshot("setup-timeout")
+                raise SystemExit("bootstrap.sh didn't finish within an hour")
+            vm.screenshot("setup-done")
+            step("bootstrap.sh finished; logging out and back in")
+            vm.type("\n")  # "Press Enter to log out"
+            time.sleep(15)
+            vm.type(f"{USER}\n{PASSWORD}\n")
+            time.sleep(60)
+            step(f"Babbage desktop: {vm.screenshot('desktop')}")
+        vm.stop()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+main()

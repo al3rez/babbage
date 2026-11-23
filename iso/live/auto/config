@@ -1,0 +1,22 @@
+#!/bin/sh
+# live-build settings for the installer's live system (iso/build runs `lb config`, which runs this).
+# The live system is only the installer: no desktop, no firmware, root on the first console.
+set -e
+
+lb config noauto \
+  --distribution trixie \
+  --architectures amd64 \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --binary-images iso-hybrid \
+  --debian-installer none \
+  --apt-recommends false \
+  --firmware-binary false \
+  --firmware-chroot false \
+  --memtest none \
+  --chroot-squashfs-compression-type zstd \
+  --image-name babbage \
+  --iso-volume Babbage \
+  --iso-application "Babbage installer" \
+  --iso-publisher "https://github.com/al3rez/babbage" \
+  --bootappend-live "boot=live components quiet loglevel=3 live-config.noautologin live-config.hostname=babbage" \
+  "${@}"

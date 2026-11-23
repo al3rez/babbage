@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Builds iso/out/babbage-<date>-amd64.iso. Runs as root on Debian 13; without root, use
+# iso/build-in-vm, which runs this inside a throwaway Debian VM.
+#
+# Like Omarchy's ISO, the installer writes a prebuilt system instead of downloading one:
+#   1. mmdebstrap builds the installed system (Debian 13 + XFCE, iso/packages) with a clone of
+#      this repo, into rootfs.tar.zst
+#   2. live-build makes a small live system around it (iso/live) that boots into
+#      babbage-install, which asks a few questions and unpacks that image onto a disk
+# The first login on the installed system runs bootstrap.sh for the rest (Nix, Home Manager).
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(dirname "$here")"
+out="${OUT:-$here/out}"
+work="${WORK:-/var/tmp/babbage-iso}"
+version="${VERSION:-$(date -u +%Y.%m.%d)}"
+mirror=http://deb.debian.org/debian
+components="main contrib non-free non-free-firmware"
+
+[ "$(id -u)" = 0 ] || { echo "iso/build needs root (or run iso/build-in-vm)" >&2; exit 1; }
+export DEBIAN_FRONTEND=noninteractive
+missing=$(for p in live-build mmdebstrap zstd git; do dpkg -s "$p" >/dev/null 2>&1 || echo "$p"; done)
+[ -z "$missing" ] || { apt-get update -q; apt-get install -y -q $missing; }
+
+# live-build can leave the chroot's /sys (and more, after a failed build) mounted; never
+# delete through a mount
+unmount_work() { findmnt -rno TARGET | { grep "^$work/" || true; } | sort -r | while read -r m; do umount -l "$m"; done; }
+unmount_work
+trap unmount_work EXIT
+rm -rf --one-file-system "$work"
+mkdir -p "$work" "$out"
+cp -a "$here/live/." "$work/"
+mkdir -p "$work/config/includes.binary/babbage" "$work/tmp"
+export TMPDIR="$work/tmp"   # mmdebstrap unpacks the whole system here; /tmp may be a small tmpfs
+
+# the splash says Babbage; drop the theme's "Live Boot Menu with GRUB" title over it
+mkdir -p "$work/config/bootloaders/grub-pc/live-theme"
+sed 's/^title-text:.*/title-text: ""/' /usr/share/live/build/bootloaders/grub-pc/live-theme/theme.txt \
+  >"$work/config/bootloaders/grub-pc/live-theme/theme.txt"
+# 1. The installed system. The repo goes in as a clone of HEAD pointing at GitHub, so
+#    `git pull` updates it later; the installer copies it to ~/.config/home-manager.
+git clone -q "$repo" "$work/repo"
+git -C "$work/repo" remote set-url origin https://github.com/al3rez/babbage.git
+mmdebstrap \
+  --variant=important \
+  --components="$components" \
+  --include="$(grep -v '^#' "$here/packages" | xargs | tr ' ' ',')" \
+  --aptopt='APT::Install-Recommends "true"' \
+  --customize-hook='echo "en_US.UTF-8 UTF-8" >"$1/etc/locale.gen"' \
+  --customize-hook='chroot "$1" locale-gen' \
+  --customize-hook='echo LANG=en_US.UTF-8 >"$1/etc/default/locale"' \
+  --customize-hook="cp -R --preserve=mode,timestamps '$here/target/.' \"\$1/\"" \
+  --customize-hook="mkdir -p \"\$1/usr/share/babbage\" && cp -a '$work/repo' \"\$1/usr/share/babbage/repo\"" \
+  --customize-hook='rm -f "$1/etc/apt/apt.conf.d/99mmdebstrap"' \
+  --customize-hook=': >"$1/etc/machine-id"; rm -f "$1/var/lib/dbus/machine-id" "$1/etc/hostname"' \
+  trixie "$work/config/includes.binary/babbage/rootfs.tar.zst" \
+  "deb $mirror trixie $components" \
+  "deb $mirror trixie-updates $components" \
+  "deb http://security.debian.org/debian-security trixie-security $components"
+
+# 2. The live installer around it
+cd "$work"
+lb config
+lb build
+iso="$out/babbage-$version-amd64.iso"
+mv "$work"/*.iso "$iso"
+(cd "$out" && sha256sum "$(basename "$iso")" >"$(basename "$iso").sha256")
+echo "Built $iso"

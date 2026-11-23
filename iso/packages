@@ -1,0 +1,39 @@
+# The installed system (iso/build feeds this to mmdebstrap, with Recommends, as Debian's
+# installer would). Debian's own "Debian desktop environment" + "Xfce" tasks are what
+# bootstrap.sh is tested on; Babbage's Nix half arrives at the first login.
+
+# boot, disk encryption, console
+linux-image-amd64
+grub-efi-amd64
+efibootmgr
+cryptsetup
+cryptsetup-initramfs
+initramfs-tools
+console-setup
+keyboard-configuration
+locales
+sudo
+
+# firmware: GPUs, Wi-Fi, Bluetooth, audio, CPU microcode
+firmware-linux
+firmware-iwlwifi
+firmware-realtek
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek
+firmware-sof-signed
+amd64-microcode
+intel-microcode
+
+# desktop: what Debian's installer installs for Xfce
+task-desktop
+task-xfce-desktop
+xfce4-terminal
+network-manager-gnome
+
+# bootstrap.sh needs these before it can install anything else
+git
+curl
+ca-certificates
+xz-utils
+dbus-user-session

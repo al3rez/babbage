@@ -19,7 +19,7 @@ built with a Nix Home Manager flake.
 
 ![Babbage at 4K](docs/screenshot.png)
 
-<sub>3840×2160, taken in a Debian 13 VM set up by `bootstrap.sh al3rez-vm`: two Ghostty windows
+<sub>3840×2160, taken in a Debian 13 VM set up by `bootstrap.sh generic`: two Ghostty windows
 tiled by i3 (the focused one bright, the other dimmed), every window with the `ring` edge (picom's GLX
 backend, as on the NVIDIA profile; the Mesa profile's xrender draws no edges), a
 notification in the middle of the bar. Below, the two top halves at 1:1 (no scaling).</sub>
@@ -53,16 +53,19 @@ down in and back up out (recorded in the VM at 60 fps, real speed, then 4× slow
 
 ![notification sliding into the menu bar](docs/notification.gif)
 
+Install from the ISO (UEFI, Secure Boot off; see [The ISO](#the-iso)), or on a Debian 13 you
+already have, as any user:
+
 ```sh
 git clone https://github.com/al3rez/babbage ~/.config/home-manager
-~/.config/home-manager/bootstrap.sh              # NVIDIA machine (LG 4K + ASUS layout)
-~/.config/home-manager/bootstrap.sh al3rez-vm    # anything else (Mesa)
+~/.config/home-manager/bootstrap.sh generic    # any machine (Mesa)
+~/.config/home-manager/bootstrap.sh            # the al3rez desk: NVIDIA, LG 4K + ASUS layout, Bangkok
 ```
 
-After the first run, apply changes with:
+After the first run, apply changes with (`--impure`: the profile takes your username from `$USER`):
 
 ```sh
-home-manager switch --flake ~/.config/home-manager#al3rez
+home-manager switch --impure --flake ~/.config/home-manager#generic   # or #al3rez
 ```
 
 ## What it sets up
@@ -98,6 +101,31 @@ home-manager switch --flake ~/.config/home-manager#al3rez
 | Kernel updates never boot to a black screen: `linux-headers-amd64` is installed, so every new kernel brings its headers and DKMS builds the NVIDIA driver for it. After every apt run, `nvidia-kernel-check` (a `DPkg::Post-Invoke` hook) checks the newest kernel: if its driver is missing it builds it, or installs the missing headers in the background (`journalctl -u nvidia-kernel-headers`) so DKMS builds it. Until it's built, GRUB boots the newest kernel that has the driver (`GRUB_DEFAULT=saved` in `/etc/default/grub.d/nvidia-safe-kernel.cfg`, the hook sets the entry) and switches to the new one by itself once it's ready. If a kernel boots without the driver anyway (picked by hand, or the build failed), `nvidia-kernel-autofix.service` repairs it at boot: it waits for the network, installs that kernel's headers, builds and loads the driver and restarts the login screen, with no reboot, retrying every 30 seconds until it works. On a normal boot it exits at once `home-manager switch` warns when the headers or any of these files are missing | `files/bin/nvidia-kernel-check`, `files/apt/99nvidia-kernel-check`, `files/grub/nvidia-safe-kernel.cfg`, `files/systemd/nvidia-kernel-autofix.service`, `bootstrap.sh`, `modules/monitors.nix` |
 | RGB lighting off: both DDR5 sticks (ENE) and the ASRock B850M board's lighting controller (RGB header and the three addressable headers), set to Off by OpenRGB on every login (`rgb-off` user service), since RAM lighting resets when power is cut. Needs OpenRGB's udev rules in `/etc/udev/rules.d` (`bootstrap.sh` installs them). The Logitech G304 is left alone | `modules/rgb.nix`, `bootstrap.sh` |
 
+## The ISO
+
+Babbage's installer works like [Omarchy's](https://github.com/omacom-io/omarchy-iso). It boots
+into a few questions (keyboard, name, username, password, computer name, timezone, disk, and
+whether to encrypt it; encryption is on by default and uses the same password), then writes a
+prebuilt Debian 13 + Xfce system to the disk. No network is needed to install. The first login
+opens a terminal that runs `bootstrap.sh generic` (that part needs internet, 10-30 minutes),
+then logs out so the i3 session starts. UEFI only; turn Secure Boot off.
+
+| Piece | Where |
+|---|---|
+| Build on Debian 13 as root: mmdebstrap builds the installed system (`iso/packages` + this repo, cloned to `/usr/share/babbage/repo`) as `rootfs.tar.zst`, live-build wraps it in a small live system | `iso/build` |
+| Build without root: the same thing inside Debian's cloud image in QEMU/KVM (`KEEP=1` keeps the builder VM for the next run) | `iso/build-in-vm` |
+| The installer: questions with gum, GPT (ESP, `/boot`, root), LUKS2, unpack, user, GRUB. A volume labelled `BABBAGECFG` with an `install.conf` makes it unattended | `iso/live/config/includes.chroot/usr/local/bin/babbage-install` |
+| First-login setup (autostarted once, removed when bootstrap succeeds) | `iso/target/usr/local/bin/babbage-setup` |
+| Boot menu splash in the identity's colours | `iso/mksplash.py` |
+| End-to-end test in QEMU (UEFI, no root): unattended encrypted install, unlock, boot, checks over serial, login-screen screenshot; `--full` also logs in and runs the first-login setup | `iso/test` |
+
+```sh
+iso/build-in-vm   # -> iso/out/babbage-<date>-amd64.iso (+ .sha256)
+iso/test          # screenshots and serial logs in iso/out/test/
+```
+
+The landing page is `site/index.html` (static, no build step).
+
 ## Moving this machine onto the flake
 
 The live desktop was set up by hand first; a few of those pieces would shadow or duplicate the Nix ones, so remove them before the first switch:
@@ -122,7 +150,7 @@ again. Editing them by hand needs the same order (`xfce4-panel -q`, edit, `xfce4
 
 ## Tested
 
-Fresh Debian 13 (trixie) VM, `task-xfce-desktop`, then `./bootstrap.sh al3rez-vm`: i3 session,
+Fresh Debian 13 (trixie) VM, `task-xfce-desktop`, then `./bootstrap.sh generic`: i3 session,
 transparent bar, wallpaper, Ghostty tabs + prompt, Telegram tray icon, centred notification, picom
 all come up on first login.
 

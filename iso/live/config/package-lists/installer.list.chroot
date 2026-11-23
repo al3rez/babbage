@@ -1,0 +1,12 @@
+# What babbage-install needs in the live system
+gum
+cryptsetup
+dosfstools
+e2fsprogs
+gdisk
+parted
+zstd
+console-setup
+keyboard-configuration
+kbd
+less

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# First login after installing from the ISO: finishes Babbage with bootstrap.sh in a
+# terminal, then logs out so the i3 session starts. ~/.config/autostart/babbage-setup.desktop
+# (put there by the installer) starts it at every login until it succeeds, then it's removed.
+# Run it again by hand any time: babbage-setup
+set -uo pipefail
+
+repo="$HOME/.config/home-manager"
+autostart="$HOME/.config/autostart/babbage-setup.desktop"
+log="${XDG_STATE_HOME:-$HOME/.local/state}/babbage-setup.log"
+mkdir -p "$(dirname "$log")"
+
+printf '\n  \033[1;34mBabbage\033[0m: finishing setup\n\n'
+echo "  This installs Nix, the desktop and the apps: a few GB of downloads, 10-30 minutes."
+echo "  The log is in $log"
+echo
+
+until curl -fsS -m 5 -o /dev/null https://cache.nixos.org/nix-cache-info; do
+  echo "  Waiting for the internet: connect with the network icon in the panel..."
+  sleep 5
+done
+
+echo "  Your password, for the system-wide parts (apt, Nix):"
+until sudo -v; do :; done
+# keep sudo's ticket fresh for the whole run
+while sleep 60; do sudo -n -v 2>/dev/null || exit; done &
+keepalive=$!
+trap 'kill $keepalive 2>/dev/null' EXIT
+
+if "$repo/bootstrap.sh" generic 2>&1 | tee "$log"; then
+  rm -f "$autostart"
+  echo
+  read -rp "  Babbage is ready. Press Enter to log out, then log back in. " _
+  xfce4-session-logout --logout --fast
+else
+  echo
+  echo "  Setup stopped with an error (above, and in $log)."
+  echo "  It runs again at your next login, or run babbage-setup now."
+  read -rp "  Press Enter to close. " _
+fi
