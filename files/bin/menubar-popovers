@@ -9,7 +9,7 @@ menu, and opens one popover style for all of them:
     on/off switch, this device, every device with its IP (click copies), offline devices,
     exit node, admin console. (`tailscale systray` draws a fixed bitmap that can't match.)
   * 1Password: a white glyph of its mark, and Open / Quick Access / Lock. Its own tray icon is a
-    fixed full-colour bitmap in an XEmbed window (no dbusmenu to mirror), hidden in the tray.
+    fixed full-colour bitmap, hidden in the tray (modules/panel.nix hidden-items).
   * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi, Hex): a stand-in icon mirroring
     the app's own icon; the original is hidden in the tray (modules/panel.nix hidden-items).
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,

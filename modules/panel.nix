@@ -204,15 +204,15 @@ in
     # Electron apps (ChatGPT, Slack) put a fixed full-colour bitmap in the tray that can't be
     # themed like the white glyphs; they open from the bar or a shortcut instead. Wi-Fi,
     # Telegram, Bluetooth, Hex and 1Password are shown by files/bin/menubar-popovers' stand-ins
-    # instead (their popovers). 1Password's own icon is an XEmbed window named "1password".
-    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "1password"
+    # instead (their popovers). 1Password's own is hidden by its tray Id, 1Password_status_icon_1.
+    "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "1Password_status_icon_1"
                                         "nm-applet" "TelegramDesktop" "blueman" "hex" ];
     # tray order (the tray lists items in this order and puts new ones first): 1Password, Hex,
     # Wi-Fi, Bluetooth, Telegram, Tailscale
     "plugins/plugin-6/known-items" = [ "menubar-1password" "menubar-hex" "menubar-wi-fi" "menubar-bluetooth"
                                        "menubar-telegram" "tailscale" "hex" "steam" "ZapZap" "Slack_status_icon_1"
                                        "nm-applet" "chrome_status_icon_1" "TelegramDesktop" "blueman"
-                                       "1password" ];
+                                       "1Password_status_icon_1" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 
@@ -265,12 +265,15 @@ in
       X-GNOME-Autostart-enabled=true
     '';
     # 1Password (Debian package from 1Password's repo, bootstrap.sh) unlocks with the session and
-    # waits in the background, so the browser extension, `op` and Quick Access work right away
+    # waits in the background, so the browser extension, `op` and Quick Access work right away.
+    # It starts once the panel's tray is up: Electron registers a D-Bus tray item (which the
+    # tray can hide by Id) only if the tray already exists, else it docks an XEmbed icon that
+    # can't be hidden
     "autostart/1password.desktop".text = ''
       [Desktop Entry]
       Type=Application
       Name=1Password
-      Exec=/opt/1Password/1password --silent
+      Exec=sh -c 'for i in $(seq 60); do busctl --user status org.kde.StatusNotifierWatcher >/dev/null 2>&1 && break; sleep 1; done; exec /opt/1Password/1password --silent'
       NoDisplay=true
       X-GNOME-Autostart-enabled=true
     '';
