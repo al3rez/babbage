@@ -8,6 +8,8 @@ menu, and opens one popover style for all of them:
   * Tailscale: its own icon (files/icons/tailscale, faint when disconnected) and content:
     on/off switch, this device, every device with its IP (click copies), offline devices,
     exit node, admin console. (`tailscale systray` draws a fixed bitmap that can't match.)
+  * 1Password: a white glyph of its mark, and Open / Quick Access / Lock. Its own tray icon is a
+    fixed full-colour bitmap in an XEmbed window (no dbusmenu to mirror), hidden in the tray.
   * Apps with a tray menu (PROXIED: Telegram, Bluetooth, Wi-Fi, Hex): a stand-in icon mirroring
     the app's own icon; the original is hidden in the tray (modules/panel.nix hidden-items).
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
@@ -393,6 +395,36 @@ class TailscaleItem(TrayItem):
         self.app.popover.rebuild()
 
 
+class OnePasswordItem(TrayItem):
+    APP = "/opt/1Password/1password"
+
+    def __init__(self, app):
+        super().__init__(app, "/menubar/1password")
+
+    def props(self):
+        return {
+            "Category": GLib.Variant("s", "ApplicationStatus"), "Id": GLib.Variant("s", "menubar-1password"),
+            "Title": GLib.Variant("s", "1Password"), "Status": GLib.Variant("s", "Active"),
+            "IconName": GLib.Variant("s", "menubar-1password"), "IconThemePath": GLib.Variant("s", ICONS),
+            "IconPixmap": GLib.Variant("a(iiay)", []), "ItemIsMenu": GLib.Variant("b", False),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", ("", [], "1Password", "")),
+        }
+
+    def open(self, *args):
+        subprocess.Popen([self.APP, *args], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.app.popover.close()
+
+    def fill(self, pop, card):
+        logo = Gtk.Image.new_from_icon_name("1password", Gtk.IconSize.DIALOG)
+        logo.set_pixel_size(round(18 * self.app.scale))
+        pop.header(card, logo, "1Password")
+        pop.row(card, None, "Open 1Password", "", lambda _l: self.open())
+        pop.row(card, None, "Quick Access", "Ctrl+Shift+Space", lambda _l: self.open("--quick-access"))
+        pop.rule(card)
+        pop.row(card, None, "Lock", "", lambda _l: self.open("--lock"))
+
+
 class ProxyItem(TrayItem):
     """Stands in for an app's tray icon: same icon, our popover with the app's menu."""
 
@@ -714,6 +746,7 @@ class App:
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
         self.sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
         self.tailscale = TailscaleItem(self)
+        self.onepassword = OnePasswordItem(self)
         self.badges = Badges(self)
         self.proxies = {}   # tray Id -> ProxyItem
         self.bus.signal_subscribe(WATCHER[0], WATCHER[2], None, WATCHER[1], None,
@@ -724,6 +757,7 @@ class App:
 
     def on_tray(self, *_):
         self.tailscale.register()
+        self.onepassword.register()
         for p in self.proxies.values():
             p.register()
         self.scan()
