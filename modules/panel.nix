@@ -187,6 +187,20 @@ let
     name = "launcher-${id}/${file}";
     path = pkgs.writeText file (pinnedEntry pinned.${file});
   }) pinnedLaunchers);
+  # Bar icon sizes (files/bin/bar-icons): a window to resize each pinned icon and tray glyph,
+  # saved in files/panel/icon-sizes.json and drawn by `bar-icons apply` after every switch
+  barIcons = pkgs.writeShellScriptBin "bar-icons" ''
+    export GI_TYPELIB_PATH=${lib.makeSearchPathOutput "out" "lib/girepository-1.0"
+      (with pkgs; [ gtk3 gdk-pixbuf pango atk harfbuzz glib gobject-introspection ])}
+    unset GTK_MODULES GTK_PATH   # Debian's GTK modules don't load into Nix's GTK
+    export GDK_PIXBUF_MODULE_FILE=${pkgs.librsvg.out}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache   # SVG icons
+    export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
+    export XFCONF_QUERY=/usr/bin/xfconf-query
+    export BAR_ICONS_CONFIG=${config.xdg.configHome}/home-manager/files/panel/icon-sizes.json
+    export BAR_ICONS_DEFAULT=${../files/panel/icon-sizes.json}
+    export BAR_ICONS_PINNED=${pinnedFarm} BAR_ICONS_TRAY=${../files/icons/tailscale}
+    exec ${pkgs.python3.withPackages (p: [ p.pygobject3 p.pycairo p.pillow ])}/bin/python3 ${../files/bin/bar-icons} "$@"
+  '';
 in
 {
   # Top menu bar: workspace numbers, Ghostty + Grok Bot + ChatGPT + T3 Code + Slack + WhatsApp + LINE + DeepSeek Harness + Chrome + Steam on the left,
@@ -254,6 +268,17 @@ in
 
   xdg.dataFile."applications/steam.desktop".text = steamDesktop;
 
+  home.packages = [ barIcons ];
+  xdg.dataFile."applications/bar-icons.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Bar Icon Sizes
+    Comment=Change the size of each icon on the menu bar
+    Exec=${barIcons}/bin/bar-icons
+    Icon=preferences-desktop-icons
+    Categories=Settings;
+  '';
+
   xdg.configFile = {
     # nm-applet as a StatusNotifierItem (its menu over dbusmenu), so it gets a popover too
     "autostart/nm-applet.desktop".text = ''
@@ -313,6 +338,11 @@ in
         run install -Dm644 "$f" "$dest"
       fi
     done
+  '';
+
+  # the saved bar icon sizes (files/panel/icon-sizes.json), drawn over the launchers just copied
+  home.activation.barIcons = lib.hm.dag.entryAfter [ "pinnedLaunchers" ] ''
+    run ${barIcons}/bin/bar-icons apply || true
   '';
 
   # Pick up panel changes in a running session, restarting the panel only when something it
