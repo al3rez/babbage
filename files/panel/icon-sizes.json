@@ -1,4 +1,29 @@
 {
   "pinned": {},
-  "tray": {}
+  "tray": {
+    "1Password": [
+      23,
+      23
+    ],
+    "Clipboard": [
+      18,
+      23
+    ],
+    "Hex": [
+      22,
+      23
+    ],
+    "Tailscale": [
+      21,
+      20
+    ],
+    "Telegram": [
+      25,
+      19
+    ],
+    "Wi-Fi": [
+      28,
+      21
+    ]
+  }
 }
