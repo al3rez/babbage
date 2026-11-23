@@ -454,7 +454,7 @@ class OnePasswordItem(TrayItem):
 class ClipboardItem(TrayItem):
     """Clipman's clipboard glyph (the icon theme's clipman.svg, files/icons/WhiteSur-Mac), drawn
     here so bar-icons can resize it like the others; a click opens Clipman's own menu. Clipman's
-    own tray icon (an XEmbed window, named "clipman") is hidden in the tray."""
+    own tray icon never docks (modules/clipman.nix)."""
 
     def __init__(self, app):
         super().__init__(app, "/menubar/clipboard")
@@ -833,28 +833,6 @@ class App:
             p.register()
         self.scan()
         GLib.timeout_add_seconds(5, self.revive_blueman)
-        GLib.timeout_add_seconds(5, self.rehide)
-
-    def rehide(self):
-        """The tray matches an XEmbed icon (Clipman's) against hidden-items by its window title,
-        which Clipman sets only after its icon docks: after the panel (re)starts, its icon shows
-        next to our clipboard. The tray looks again whenever hidden-items changes, so change it
-        and put it back."""
-        def query(*args):
-            try:
-                return subprocess.run([XFCONF, "-c", "xfce4-panel", *args], capture_output=True,
-                                      text=True, timeout=3).stdout
-            except (OSError, subprocess.TimeoutExpired):
-                return ""
-        trays = [i for ids in panel_plugin_ids() for i in ids if query("-p", f"/plugins/plugin-{i}").strip() == "systray"]
-        for i in trays:
-            prop = f"/plugins/plugin-{i}/hidden-items"
-            names = [line.strip() for line in query("-p", prop).splitlines()[2:] if line.strip()]
-            if len(names) < 2:
-                continue
-            for keep in (names[:-1], names):
-                query("-p", prop, *[a for n in keep for a in ("-t", "string", "-s", n)])
-        return False
 
     def revive_blueman(self):
         """blueman-tray registers its tray item once, at start, and never again: after the panel

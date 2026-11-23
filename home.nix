@@ -38,6 +38,7 @@ in
     ./modules/rgb.nix
     ./modules/deepseek-harness.nix
     ./modules/hex.nix
+    ./modules/clipman.nix
   ];
 
   home.username = user;
