@@ -3,7 +3,7 @@
 let
   # GLX for the NVIDIA card; software-GL machines (VMs) need xrender to actually present frames
   backend = if gpu == "nvidia" then "glx" else "xrender";
-  # window edge style on app windows (and Clipboard History):
+  # window edge style on app windows:
   #   "gloss"    glass glint lit from the top-left (files/picom/gloss.frag)
   #   "ring"     macOS background window: 1px dark outline + 1px light inner rim (edge-ring.frag)
   #   "hairline" macOS key window: 1px light rim, brighter on top (edge-hairline.frag)

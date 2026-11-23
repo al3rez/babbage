@@ -10,7 +10,7 @@
     enable = true;
     package = desk.hex;   # GPU-wrapped in home.nix: Vulkan runs on the host's driver
     # XFCE never starts graphical-session.target, so the unit is started from i3 instead
-    # (files/i3/config), like clipboard-history and menubar-popovers
+    # (files/i3/config), like menubar-popovers
     autostart = false;
     installModel = true;   # the hex-model user service downloads the default model once
     # keep the mic open between dictations (Hex's default): reopening the OBSBOT webcam mic on

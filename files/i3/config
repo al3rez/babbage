@@ -27,8 +27,8 @@ for_window [class="^LINE$" instance="__index\.html$"] floating disable
 for_window [class="^DeepSeek$" instance="^127\.0\.0\.1$"] floating disable
 for_window [window_type="dialog"] floating enable
 for_window [window_type="menu"] floating enable
-# Clipboard History (Super+Shift+V): a floating window that places itself where rofi would
-for_window [class="Clipboard-history"] floating enable, border none
+# Clipboard history (Super+Shift+V, xfce4-clipman's window) floats, like xfce4-appfinder's
+for_window [class="Xfce4-clipman-history"] floating enable
 # 1Password Quick Access (Ctrl+Shift+Space) floats like a search box, not a tiled window
 for_window [class="com.onepassword.OnePassword" title="^Quick Access"] floating enable, border none
 no_focus [class="Xfce4-notifyd"]
@@ -40,22 +40,20 @@ exec --no-startup-id @feh@ --no-fehbg --bg-fill "@wallpaper@"
 # workspace numbers in the xfce4-panel bars (genmon slots); exits if already running
 exec_always --no-startup-id @i3wsbar@
 # background services; XFCE never starts graphical-session.target, so start them here too
-exec --no-startup-id systemctl --user start clipboard-history.service
 exec --no-startup-id systemctl --user start monitor-layout-guard.service
 exec --no-startup-id systemctl --user start menubar-popovers.service
 exec --no-startup-id systemctl --user start hex.service
 
 # --- launch
 bindsym $mod+Return exec @ghostty@
-bindsym $mod+space exec --no-startup-id @launcher@
 # --disable-server: a resident appfinder keeps launching the app paths it read at first start,
 # which are old Nix store builds after every home-manager switch
 bindsym $mod+d exec xfce4-appfinder --disable-server
 bindsym $mod+Shift+f exec thunar
 # region screenshot like macOS ⌘⇧4: saved to ~/Pictures/Screenshots and copied to the clipboard
 bindsym Ctrl+Shift+4 exec --no-startup-id @screenshotregion@
-# clipboard history like Raycast (⌘⇧V there)
-bindsym $mod+Shift+v exec --no-startup-id @clipboard@
+# clipboard history: XFCE's clipboard manager (xfce4-clipman, in the tray), searchable
+bindsym $mod+Shift+v exec --no-startup-id xfce4-clipman-history
 # 1Password Quick Access, its default shortcut on other systems
 bindsym Ctrl+Shift+space exec --no-startup-id /opt/1Password/1password --quick-access
 bindsym $mod+q kill

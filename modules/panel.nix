@@ -83,12 +83,12 @@ let
     Terminal=false
   '';
 
-  # the bar's search icon: the Raycast-style launcher (Super+Space, modules/i3.nix), not xfce4-appfinder
+  # the bar's search icon: xfce4-appfinder, like Super+d (files/i3/config)
   spotlightDesktop = ''
     [Desktop Entry]
     Type=Application
     Name=Search
-    Exec=${config.home.profileDirectory}/bin/launcher
+    Exec=xfce4-appfinder --disable-server
     Icon=system-search-symbolic
   '';
 
@@ -216,7 +216,7 @@ in
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 
-    # app menu still reachable with Super+Space (not on the bar)
+    # Whisker menu: defined, not on the bar
     "plugins/plugin-19" = "whiskermenu";
     "plugins/plugin-19/button-icon" = "menu-grid-symbolic";
     "plugins/plugin-19/show-button-title" = false;
