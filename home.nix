@@ -30,6 +30,7 @@ in
     ./modules/ghostty.nix
     ./modules/theme.nix
     ./modules/appearance.nix
+    ./modules/line.nix
     ./modules/shell.nix
     ./modules/monitors.nix
     ./modules/power.nix
