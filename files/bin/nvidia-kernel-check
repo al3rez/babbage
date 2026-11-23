@@ -9,9 +9,30 @@
 #  3. Either way GRUB boots the newest kernel that has the driver (GRUB_DEFAULT=saved,
 #     files/grub/nvidia-safe-kernel.cfg), so until the new one is ready the machine keeps
 #     booting the previous kernel instead of a black screen.
+#  4. `nvidia-kernel-check boot` (nvidia-kernel-autofix.service, every boot): if the kernel that
+#     booted has no driver anyway (picked by hand in GRUB, or everything above failed), wait for
+#     the network, install its headers, build the driver, load it and restart the login screen.
+#     No reboot. A failed try is retried by systemd every 30 seconds.
 set -u
 
 has_module() { ls "/lib/modules/$1/updates/dkms/nvidia.ko"* >/dev/null 2>&1; }
+
+if [ "${1:-}" = boot ]; then
+  k=$(uname -r)
+  has_module "$k" && exit 0
+  echo "nvidia-kernel-check: kernel $k has no NVIDIA driver; repairing"
+  nm-online -q -t 300 || { echo "no network yet"; exit 1; }
+  apt-get update -qq || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -o DPkg::Lock::Timeout=600 \
+    linux-headers-amd64 "linux-headers-$k" || exit 1
+  has_module "$k" || dkms autoinstall -k "$k"
+  has_module "$k" || { echo "DKMS build failed; see /var/lib/dkms/nvidia/*/build/make.log"; exit 1; }
+  update-initramfs -u -k "$k"
+  modprobe nvidia_drm || exit 1
+  echo "nvidia-kernel-check: NVIDIA driver built and loaded for $k; restarting the login screen"
+  systemctl restart display-manager
+  exit 0
+fi
 
 kernels=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V)
 [ -n "$kernels" ] || exit 0

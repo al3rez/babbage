@@ -1,0 +1,16 @@
+# Every boot: if the running kernel has no NVIDIA driver, build it and restart the login screen
+# (files/bin/nvidia-kernel-check, "boot" mode). Exits at once when the driver is there, and
+# waits for the network itself, so a normal boot isn't held up.
+# Installed to /etc/systemd/system/ by bootstrap.sh (NVIDIA profile).
+[Unit]
+Description=Rebuild the NVIDIA driver if this kernel has none
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nvidia-kernel-check boot
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

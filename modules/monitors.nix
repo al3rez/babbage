@@ -89,6 +89,10 @@ in
       check "${../files/bin/nvidia-kernel-check}" /usr/local/sbin/nvidia-kernel-check 755
       check "${../files/apt/99nvidia-kernel-check}" /etc/apt/apt.conf.d/99nvidia-kernel-check
       check "${../files/grub/nvidia-safe-kernel.cfg}" /etc/default/grub.d/nvidia-safe-kernel.cfg
+      check "${../files/systemd/nvidia-kernel-autofix.service}" /etc/systemd/system/nvidia-kernel-autofix.service
+      if ! /usr/bin/systemctl is-enabled -q nvidia-kernel-autofix.service 2>/dev/null; then
+        $DRY_RUN_CMD echo "WARNING: nvidia-kernel-autofix.service is not enabled; run: sudo systemctl enable nvidia-kernel-autofix.service"
+      fi
       if [ "$(/usr/bin/dpkg-query -W -f="\''${Status}" linux-headers-amd64 2>/dev/null)" != "install ok installed" ]; then
         $DRY_RUN_CMD echo "WARNING: linux-headers-amd64 is not installed; run: sudo apt install linux-headers-amd64"
       fi
