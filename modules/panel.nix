@@ -216,17 +216,19 @@ in
     "plugins/plugin-6/icon-size" = 30;
     "plugins/plugin-6/square-icons" = true;
     # Electron apps (ChatGPT, Slack) put a fixed full-colour bitmap in the tray that can't be
-    # themed like the white glyphs; they open from the bar or a shortcut instead. Wi-Fi,
-    # Telegram, Bluetooth, Hex and 1Password are shown by files/bin/menubar-popovers' stand-ins
-    # instead (their popovers). 1Password's own is hidden by its tray Id, 1Password_status_icon_1.
+    # themed like the white glyphs; they open from the bar or a shortcut instead. Clipboard,
+    # Wi-Fi, Telegram, Bluetooth, Hex and 1Password are shown by files/bin/menubar-popovers'
+    # stand-ins instead (their popovers, or Clipman's menu), so files/bin/bar-icons can resize
+    # them. 1Password's own is hidden by its tray Id, 1Password_status_icon_1; Clipman's XEmbed
+    # icon by its window title, lowercased: clipman.
     "plugins/plugin-6/hidden-items" = [ "chrome_status_icon_1" "Slack_status_icon_1" "1Password_status_icon_1"
-                                        "nm-applet" "TelegramDesktop" "blueman" "hex" ];
-    # tray order (the tray lists items in this order and puts new ones first): 1Password, Hex,
-    # Wi-Fi, Bluetooth, Telegram, Tailscale
-    "plugins/plugin-6/known-items" = [ "menubar-1password" "menubar-hex" "menubar-wi-fi" "menubar-bluetooth"
-                                       "menubar-telegram" "tailscale" "hex" "steam" "ZapZap" "Slack_status_icon_1"
-                                       "nm-applet" "chrome_status_icon_1" "TelegramDesktop" "blueman"
-                                       "1Password_status_icon_1" ];
+                                        "nm-applet" "TelegramDesktop" "blueman" "hex" "clipman" ];
+    # tray order (the tray lists items in this order and puts new ones first): Clipboard,
+    # 1Password, Hex, Wi-Fi, Bluetooth, Telegram, Tailscale
+    "plugins/plugin-6/known-items" = [ "menubar-clipboard" "menubar-1password" "menubar-hex" "menubar-wi-fi"
+                                       "menubar-bluetooth" "menubar-telegram" "tailscale" "hex" "steam" "ZapZap"
+                                       "Slack_status_icon_1" "nm-applet" "chrome_status_icon_1" "TelegramDesktop"
+                                       "blueman" "1Password_status_icon_1" "clipman" ];
     "plugins/plugin-21" = "pulseaudio";
     "plugins/plugin-21/enable-keyboard-shortcuts" = true;
 

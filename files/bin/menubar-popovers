@@ -130,19 +130,21 @@ def file_image(name, size):
     return Gtk.Image.new_from_pixbuf(pb)
 
 
-def glyph(name):
-    """(IconName, IconThemePath) for a glyph of files/icons/tailscale: bar-icons' resized copy
-    if there is one, else the original."""
+def glyph(name, fallback=None):
+    """(IconName, IconThemePath) for a tray icon: bar-icons' resized copy if there is one, else
+    `fallback` (default: the glyph of files/icons/tailscale). The copy keeps a -symbolic name
+    symbolic, so the tray still draws it in the bar's colour."""
     src = os.path.join(RESIZED, f"{name}.svg")
     try:
         stamp = os.stat(src).st_mtime_ns
     except OSError:
-        return name, ICONS
-    shown = f"{name}-{stamp}"
+        return fallback or (name, ICONS)
+    base, symbolic = (name[:-len("-symbolic")], "-symbolic") if name.endswith("-symbolic") else (name, "")
+    shown = f"{base}-{stamp}{symbolic}"
     dst = os.path.join(RUNTIME, f"{shown}.svg")
     if not os.path.exists(dst):
         os.makedirs(RUNTIME, exist_ok=True)
-        for old in glob.glob(os.path.join(RUNTIME, f"{name}-[0-9]*.svg")):
+        for old in glob.glob(os.path.join(RUNTIME, f"{base}-[0-9]*{symbolic}.svg")):
             os.remove(old)
         shutil.copyfile(src, dst)
     return shown, RUNTIME
@@ -449,6 +451,31 @@ class OnePasswordItem(TrayItem):
         pop.row(card, None, "Lock", "", lambda _l: self.open("--lock"))
 
 
+class ClipboardItem(TrayItem):
+    """Clipman's clipboard glyph (the icon theme's clipman.svg, files/icons/WhiteSur-Mac), drawn
+    here so bar-icons can resize it like the others; a click opens Clipman's own menu. Clipman's
+    own tray icon (an XEmbed window, named "clipman") is hidden in the tray."""
+
+    def __init__(self, app):
+        super().__init__(app, "/menubar/clipboard")
+
+    def props(self):
+        icon, path = glyph("clipman", ("clipman", ""))
+        return {
+            "Category": GLib.Variant("s", "ApplicationStatus"), "Id": GLib.Variant("s", "menubar-clipboard"),
+            "Title": GLib.Variant("s", "Clipboard"), "Status": GLib.Variant("s", "Active"),
+            "IconName": GLib.Variant("s", icon), "IconThemePath": GLib.Variant("s", path),
+            "IconPixmap": GLib.Variant("a(iiay)", []), "ItemIsMenu": GLib.Variant("b", False),
+            "ToolTip": GLib.Variant("(sa(iiay)ss)", ("", [], "Clipboard", "")),
+        }
+
+    def on_call(self, _c, _s, _p, _i, method, _params, invocation):
+        if method in ("Activate", "SecondaryActivate", "ContextMenu"):
+            subprocess.Popen(["xfce4-popup-clipman"], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        invocation.return_value(None)
+
+
 class ProxyItem(TrayItem):
     """Stands in for an app's tray icon: same icon, our popover with the app's menu."""
 
@@ -505,6 +532,8 @@ class ProxyItem(TrayItem):
             icon, theme_path = glyph("menubar-hex")
         elif icon and not icon.endswith("-symbolic") and Gtk.IconTheme.get_default().has_icon(icon + "-symbolic"):
             icon += "-symbolic"   # symbolic variants render like the other tray glyphs
+        if icon and not icon.startswith("menubar-"):
+            icon, theme_path = glyph(icon, (icon, theme_path))   # a theme icon bar-icons resized
         return {
             "Category": GLib.Variant("s", o.get("Category", "ApplicationStatus")),
             "Id": GLib.Variant("s", f"menubar-{self.title.lower()}"),
@@ -771,6 +800,7 @@ class App:
         self.sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
         self.tailscale = TailscaleItem(self)
         self.onepassword = OnePasswordItem(self)
+        self.clipboard = ClipboardItem(self)
         self.badges = Badges(self)
         self.proxies = {}   # tray Id -> ProxyItem
         self.bus.signal_subscribe(WATCHER[0], WATCHER[2], None, WATCHER[1], None,
@@ -791,13 +821,14 @@ class App:
 
     def reload_icons(self):
         self.icons_pending = False
-        for item in [self.tailscale, self.onepassword, *self.proxies.values()]:
+        for item in [self.tailscale, self.onepassword, self.clipboard, *self.proxies.values()]:
             item.emit("NewIcon")
         return False
 
     def on_tray(self, *_):
         self.tailscale.register()
         self.onepassword.register()
+        self.clipboard.register()
         for p in self.proxies.values():
             p.register()
         self.scan()

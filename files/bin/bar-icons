@@ -39,12 +39,17 @@ PANEL = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/
 ICON_DIRS = [os.path.expanduser("~/.local/share/icons"), os.path.expanduser("~/.icons"),
              os.path.expanduser("~/.nix-profile/share/icons"), "/usr/local/share/icons", "/usr/share/icons"]
 
-# tray glyphs: (label, files). A group shares one size, measured on its first file (the
-# fullest shape); the others scale by the same factors, so Wi-Fi's weaker levels stay smaller
+# tray glyphs: (label, icon names). Babbage's own (files/icons/tailscale) or the icon theme's
+# (Clipman's clipboard, Telegram's symbolic icons). A group shares one size, measured on its first
+# icon (the fullest shape); the others scale by the same factors, so Wi-Fi's weaker levels stay
+# smaller
 TRAY_GROUPS = [
+    ("Clipboard", ["clipman"]),
     ("1Password", ["menubar-1password"]),
     ("Hex", ["menubar-hex"]),
     ("Wi-Fi", ["menubar-wifi-3", "menubar-wifi-2", "menubar-wifi-1", "menubar-wifi-0"]),
+    ("Telegram", ["org.telegram.desktop-symbolic", "org.telegram.desktop-mute-symbolic",
+                  "org.telegram.desktop-attention-symbolic"]),
     ("Tailscale", ["tailscale-connected", "tailscale-disconnected"]),
 ]
 
@@ -148,26 +153,30 @@ def pinned_apps():
     return apps
 
 
+def draw_pinned(img, wh, s):
+    """The artwork `img` (load(path, 512)) at wh=(width, height) px in an s px square, centred
+    where the artwork's own centre is: exactly what the bar shows."""
+    x0, y0, x1, y1 = visible_box(img)
+    _, _, cx, cy = natural(img, s)
+    w, h = (max(1, min(s, round(v))) for v in wh)
+    art = img.crop((x0, y0, x1, y1)).resize((w, h), Image.LANCZOS)
+    canvas = Image.new("RGBA", (s, s))
+    canvas.paste(art, (min(max(0, round(cx - w / 2)), s - w), min(max(0, round(cy - h / 2)), s - h)))
+    return canvas
+
+
 def render_pinned(app, icon, wh, s):
     """Draw the app's icon at wh=(width, height) px in an s px square; returns the PNG's path."""
     path = find_icon(icon)
     if not path:
         return None
-    img = load(path, 512)
-    x0, y0, x1, y1 = visible_box(img)
-    _, _, cx, cy = natural(img, s)
     w, h = (max(1, min(s, round(v))) for v in wh)
     key = hashlib.sha1(f"{path}:{os.stat(path).st_mtime_ns}:{w}x{h}:{s}".encode()).hexdigest()[:10]
     out_dir = os.path.join(STATE, "pinned")
     out = os.path.join(out_dir, f"{app[:-len('.desktop')]}-{key}.png")
     if not os.path.exists(out):
         os.makedirs(out_dir, exist_ok=True)
-        art = img.crop((x0, y0, x1, y1)).resize((w, h), Image.LANCZOS)
-        canvas = Image.new("RGBA", (s, s))
-        left = min(max(0, round(cx - w / 2)), s - w)
-        top = min(max(0, round(cy - h / 2)), s - h)
-        canvas.paste(art, (left, top))
-        canvas.save(out, optimize=True)
+        draw_pinned(load(path, 512), (w, h), s).save(out, optimize=True)
     for old in glob.glob(os.path.join(out_dir, f"{app[:-len('.desktop')]}-*.png")):
         if old != out:
             os.remove(old)
@@ -197,7 +206,12 @@ def apply_pinned(sizes, s):
 
 # ---- tray glyphs ----------------------------------------------------------------------------
 def tray_source(name):
-    return os.path.join(TRAY, f"{name}.svg")
+    """The SVG a tray icon is drawn from: Babbage's glyph, else the icon theme's; None if neither."""
+    own = os.path.join(TRAY, f"{name}.svg")
+    if os.path.exists(own):
+        return own
+    path = find_icon(name)
+    return path if path and path.endswith(".svg") else None
 
 
 def scaled_svg(svg, cx, cy, sx, sy):
@@ -214,22 +228,32 @@ def svg_units(svg, s):
     return (float(m.group(1)) / s) if m else 1.0
 
 
+def scaled_tray(names, wh, s):
+    """{file name: SVG text} for a tray group drawn at wh=(width, height) px (measured on its
+    first glyph; the others scale by the same factors)."""
+    w0, h0, cx, cy = natural(load(tray_source(names[0]), s), s)
+    sx, sy = wh[0] / w0, wh[1] / h0
+    out = {}
+    for name in names:
+        if not tray_source(name):
+            continue
+        with open(tray_source(name)) as f:
+            svg = f.read()
+        u = svg_units(svg, s)
+        out[name] = scaled_svg(svg, cx * u, cy * u, sx, sy)
+    return out
+
+
 def apply_tray(sizes, s):
     out_dir = os.path.join(STATE, "tray")
     os.makedirs(out_dir, exist_ok=True)
     wanted = set()
     for label, names in TRAY_GROUPS:
         wh = sizes["tray"].get(label)
-        if not wh or not os.path.exists(tray_source(names[0])):
+        if not wh or not tray_source(names[0]):
             continue
-        w0, h0, cx, cy = natural(load(tray_source(names[0]), s), s)
-        sx, sy = wh[0] / w0, wh[1] / h0
-        for name in names:
-            with open(tray_source(name)) as f:
-                svg = f.read()
-            u = svg_units(svg, s)
+        for name, text in scaled_tray(names, wh, s).items():
             out = os.path.join(out_dir, f"{name}.svg")
-            text = scaled_svg(svg, cx * u, cy * u, sx, sy)
             wanted.add(out)
             if not os.path.exists(out) or open(out).read() != text:
                 with open(out + ".tmp", "w") as f:
@@ -247,13 +271,13 @@ def apply(sizes):
 
 
 # ---- the window -----------------------------------------------------------------------------
-ZOOM = 3          # the preview draws the bar 3x, pixel for pixel
-BAR = 36          # bar height (px)
-PITCH = 14        # px between icon slots on the bar (launcher padding 0 7px, files/gtk-3.0/gtk.css)
-GAP = 30          # px between the pinned apps and the tray in the preview
-RULER = 52        # preview px kept for the ruler on the left
+ZOOM = 3          # the preview shows the bar 3x, pixel for pixel (2x if that doesn't fit)
 MIN = 4           # smallest size (px)
 HANDLE = 7        # preview px around an edge that grabs it
+RULER = 44        # preview px left of the bar: the ruler of bar rows (px from the bar's top)
+TOP = 34          # preview px above the bar: the ruler of screen columns
+GAP = 56          # preview px between the two parts of the bar shown (they're far apart)
+MARGIN = 12       # bar px shown either side of each part
 
 
 def to_pixbuf(img):
@@ -261,14 +285,66 @@ def to_pixbuf(img):
                                            True, 8, img.width, img.height, img.width * 4)
 
 
+def to_image(pb):
+    mode = "RGBA" if pb.get_has_alpha() else "RGB"
+    return Image.frombuffer(mode, (pb.get_width(), pb.get_height()), pb.get_pixels(), "raw", mode,
+                            pb.get_rowstride(), 1).convert("RGBA")
+
+
+def svg_image(text, s):
+    loader = GdkPixbuf.PixbufLoader()
+    loader.set_size(s, s)
+    loader.write(text.encode())
+    loader.close()
+    return to_image(loader.get_pixbuf())
+
+
 def placed(it, wh, s):
-    """(left, top, width, height) of an icon's drawn art in its s px slot, in bar px. A set size
-    is placed the way render_pinned draws it (whole px, inside the slot); the artwork's own size
-    is wherever the artwork puts it."""
+    """(left, top, width, height) of an icon's drawn art in its s px slot, in bar px: where
+    draw_pinned puts a set size, wherever the artwork puts its own size."""
     (w, h), (cx, cy) = wh, it["centre"]
     if wh == it["nat"]:
         return cx - w / 2, cy - h / 2, w, h
     return min(max(0, round(cx - w / 2)), s - w), min(max(0, round(cy - h / 2)), s - h), w, h
+
+
+def bar_layout():
+    """The primary bar on screen, over AT-SPI (its plugin box has one child per plugin, in
+    plugin-ids order): {"bar": (x, y, w, h), "pinned": {app file: launcher button (x, y, w, h)},
+    "tray": the tray's (x, y, w, h)}."""
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+    ids = [int(v) for v in map(str.strip, (xfconf("xfce4-panel", "/panels/panel-1/plugin-ids") or "").splitlines())
+           if v.isdigit()]
+    kinds = {i: (xfconf("xfce4-panel", f"/plugins/plugin-{i}") or "").strip() for i in ids}
+    files = {}
+    for path in glob.glob(os.path.join(PINNED, "launcher-*", "*.desktop")):
+        files[int(path.split("launcher-")[1].split("/")[0])] = os.path.basename(path)
+    desk = Atspi.get_desktop(0)
+    for i in range(desk.get_child_count()):
+        app = desk.get_child_at_index(i)
+        if not app or app.get_name() != "xfce4-panel":
+            continue
+        queue = [app]
+        while queue:
+            node = queue.pop(0)
+            try:
+                n = node.get_child_count()
+            except GLib.Error:
+                continue
+            if n == len(ids) and n > 3:
+                e = node.get_extents(Atspi.CoordType.SCREEN)
+                out = {"bar": (e.x, e.y, e.width, e.height), "pinned": {}, "tray": None}
+                for k, pid in enumerate(ids):
+                    e = node.get_child_at_index(k).get_extents(Atspi.CoordType.SCREEN)
+                    box = (e.x, e.y, e.width, e.height)
+                    if pid in files:
+                        out["pinned"][files[pid]] = box
+                    elif kinds[pid] == "systray":
+                        out["tray"] = box
+                return out
+            queue.extend(c for c in (node.get_child_at_index(k) for k in range(n)) if c)
+    return None
 
 
 def window():
@@ -277,106 +353,203 @@ def window():
     from gi.repository import Gdk, Gtk
     import cairo
 
-    s, Z = slot(), ZOOM
+    s = slot()
     saved = load_sizes()
     sizes = json.loads(json.dumps(saved))
+    layout = bar_layout()
+    if not layout or not layout["pinned"]:
+        dlg = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
+                                text="Can't find the menu bar")
+        dlg.format_secondary_text("Bar Icon Sizes reads the bar's layout over accessibility (AT-SPI).")
+        dlg.run()
+        return
+    bx, by, bw, bh = layout["bar"]
+    root = Gdk.get_default_root_window()
 
+    # the two parts of the bar shown, in screen px: the pinned apps and the tray
+    buttons = layout["pinned"].values()
+    parts = [[min(b[0] for b in buttons) - MARGIN, max(b[0] + b[2] for b in buttons) + MARGIN]]
+    if layout["tray"]:
+        tx, _, tw, _ = layout["tray"]
+        parts.append([tx - MARGIN, tx + tw + MARGIN])
+    screen_w = Gdk.Display.get_default().get_monitor_at_point(bx + 1, by + 1).get_geometry().width
+    Z = ZOOM if RULER + sum(p[1] - p[0] for p in parts) * ZOOM + GAP < screen_w * 0.95 else 2
+    x = RULER
+    for p in parts:
+        p.append(x)                      # preview x of the part's left edge
+        x += (p[1] - p[0]) * Z + GAP
+    width, height = x - GAP + 8, TOP + bh * Z + 40
+
+    def to_preview(sx, sy):
+        """Screen px -> preview px."""
+        for x0, x1, px in parts:
+            if x0 <= sx <= x1:
+                return px + (sx - x0) * Z, TOP + (sy - by) * Z
+        return None
+
+    # the icons that can be resized, with their slot's top-left on screen
     items = []
-    for kind, key, label, path in (
-            [("pinned", app, name, find_icon(icon)) for app, name, icon in pinned_apps()]
-            + [("tray", label, label, tray_source(names[0])) for label, names in TRAY_GROUPS]):
-        if not path or not os.path.exists(path):
+    for app, name, icon in pinned_apps():
+        path = find_icon(icon)
+        box = layout["pinned"].get(app)
+        if not path or not box:
             continue
         img = load(path, 512)
         w, h, cx, cy = natural(img, s)
-        items.append(dict(kind=kind, key=key, label=label, nat=(w, h), centre=(cx, cy),
-                          art=to_pixbuf(img.crop(visible_box(img))), cache={}))
-    # slot positions along the preview strip (preview px)
-    x = RULER + PITCH * Z
-    for i, it in enumerate(items):
-        if i and it["kind"] != items[i - 1]["kind"]:
-            x += GAP * Z
-        it["x"] = x
-        x += (s + PITCH) * Z
-    width = x
-    bar_top = 24
-    slot_top = bar_top + (BAR - s) / 2 * Z
-    height = bar_top + BAR * Z + 44
+        # the launcher draws its icon 7px in from its button's right (gtk.css: padding 0 7px;
+        # Ghostty's button has 1px more on the left)
+        items.append(dict(kind="pinned", key=app, label=name, nat=(w, h), centre=(cx, cy), src=img,
+                          slot=(box[0] + box[2] - 7 - s, by + (bh - s) // 2)))
+    tray_items = []
+    for label, names in TRAY_GROUPS:
+        if tray_source(names[0]):
+            w, h, cx, cy = natural(load(tray_source(names[0]), s), s)
+            tray_items.append(dict(kind="tray", key=label, label=label, nat=(w, h), centre=(cx, cy),
+                                   names=names, slot=None))
 
-    state = {"sel": 0, "drag": None}
+    state = {"sel": 0, "drag": None, "shot": [], "stale": set()}
     pending = []
 
     def size_of(it):
         wh = sizes[it["kind"]].get(it["key"])
         return (wh[0], wh[1]) if wh else it["nat"]
 
+    def exact(it, wh, name=None):
+        """What the bar draws for it (or the group's icon `name`) at wh, as an s x s image (tray
+        glyphs in white, as the tray draws symbolic icons)."""
+        if it["kind"] == "pinned":
+            return draw_pinned(it["src"], wh, s)
+        name = name or it["names"][0]
+        if wh == it["nat"]:
+            img = load(tray_source(name), s)
+        else:
+            img = svg_image(scaled_tray(it["names"], wh, s)[name], s)
+        white = Image.new("RGBA", img.size, "white")
+        white.putalpha(img.split()[3])
+        return white
+
+    def capture():
+        """Grab the bar's parts off the screen, and find which tray icon is which (the tray
+        packs its icons side by side; ours are matched by shape)."""
+        state["shot"] = []
+        for x0, x1, _px in parts:
+            pb = Gdk.pixbuf_get_from_window(root, x0, by, x1 - x0, bh)
+            state["shot"].append(pb.scale_simple(pb.get_width() * Z, pb.get_height() * Z,
+                                                 GdkPixbuf.InterpType.NEAREST))
+        if layout["tray"]:
+            tx, _, tw, _ = layout["tray"]
+            shot = to_image(Gdk.pixbuf_get_from_window(root, tx, by, tw, bh)).convert("L")
+            cols = [max(shot.getpixel((c, r)) for r in range(bh)) > 90 for c in range(tw)]
+            runs, start = [], None
+            for c, on in enumerate(cols + [False]):
+                if on and start is None:
+                    start = c
+                elif not on and start is not None:
+                    if runs and start - runs[-1][1] <= 3:
+                        runs[-1][1] = c
+                    else:
+                        runs.append([start, c])
+                    start = None
+            top = (bh - s) // 2
+            for it in tray_items:
+                on_bar = sizes["tray"].get(it["key"])
+                # the tray draws glyphs in white on the black bar: compare each of the group's
+                # shapes (alpha) with the bar's brightness
+                wants = [exact(it, tuple(on_bar) if on_bar else it["nat"], n).split()[3]
+                         for n in it["names"] if tray_source(n)]
+                best, best_score = None, 1e9
+                for a, b in runs:
+                    left = round((a + b) / 2 - s / 2)
+                    crop = shot.crop((left, top, left + s, top + s))
+                    data = crop.tobytes()
+                    score = min(sum(abs(p - q) for p, q in zip(data, w.tobytes())) for w in wants) / (s * s)
+                    if score < best_score:
+                        best, best_score = left, score
+                it["slot"] = (tx + best, by + top) if best is not None and best_score < 25 else None
+        current = items[state["sel"]] if items else None
+        items[:] = [it for it in items if it["kind"] == "pinned"] + [it for it in tray_items if it["slot"]]
+        state["sel"] = items.index(current) if current in items else 0
+        state["stale"].clear()
+
     def rect(it):
-        """The icon's art on screen (preview px)."""
+        """The icon's art in the preview (px)."""
         left, top, w, h = placed(it, size_of(it), s)
-        return it["x"] + left * Z, slot_top + top * Z, w * Z, h * Z
+        px, py = to_preview(*it["slot"])
+        return px + left * Z, py + top * Z, w * Z, h * Z
 
     # ---- drawing
     def draw(_area, cr):
         cr.set_source_rgb(0.15, 0.15, 0.16)
         cr.paint()
-        cr.set_source_rgb(0, 0, 0)                      # the bar
-        cr.rectangle(RULER, bar_top, width - RULER, BAR * Z)
-        cr.fill()
         cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        # ruler: one tick per bar px of the icon slot, numbered every 5
         cr.set_line_width(1)
-        for p in range(s + 1):
-            y = round(slot_top + p * Z) + 0.5
-            long = p % 5 == 0
-            cr.set_source_rgba(1, 1, 1, 0.75 if long else 0.35)
-            cr.move_to(RULER - (14 if long else 7), y)
-            cr.line_to(RULER, y)
+        # the bar itself, as it is on screen, under a ruler of screen columns (tick every 2px,
+        # numbered every 20)
+        for (x0, x1, px), pb in zip(parts, state["shot"]):
+            Gdk.cairo_set_source_pixbuf(cr, pb, px, TOP)
+            cr.paint()
+            for sx in range(x0 + x0 % 2, x1 + 1, 2):
+                X = px + (sx - x0) * Z + 0.5
+                major = sx % 10 == 0
+                cr.set_source_rgba(1, 1, 1, 0.7 if major else 0.3)
+                cr.move_to(X, TOP - (10 if major else 5))
+                cr.line_to(X, TOP)
+                cr.stroke()
+                if sx % 20 == 0:
+                    cr.set_font_size(10)
+                    ext = cr.text_extents(str(sx))
+                    cr.move_to(X - ext.width / 2, TOP - 14)
+                    cr.show_text(str(sx))
+        # bar rows down the left: px from the bar's top, every px, numbered every 6
+        for r in range(bh + 1):
+            Y = TOP + r * Z + 0.5
+            major = r % 6 == 0
+            cr.set_source_rgba(1, 1, 1, 0.75 if major else 0.3)
+            cr.move_to(RULER - (12 if major else 6), Y)
+            cr.line_to(RULER, Y)
             cr.stroke()
-            if long:
-                cr.set_font_size(11)
-                t = str(p)
-                ext = cr.text_extents(t)
-                cr.move_to(RULER - 18 - ext.width, y + ext.height / 2)
-                cr.show_text(t)
+            if major:
+                cr.set_font_size(10)
+                ext = cr.text_extents(str(r))
+                cr.move_to(RULER - 16 - ext.width, Y + ext.height / 2)
+                cr.show_text(str(r))
         sel = items[state["sel"]] if items else None
         for it in items:
-            # the slot, faint
-            cr.set_source_rgba(1, 1, 1, 0.10 if it is not sel else 0.0)
-            cr.rectangle(it["x"] + 0.5, slot_top + 0.5, s * Z - 1, s * Z - 1)
-            cr.stroke()
-            rx, ry, rw, rh = rect(it)
-            key = (round(rw), round(rh))
-            pb = it["cache"].get(key)
-            if pb is None:
-                it["cache"].clear()
-                pb = it["cache"][key] = it["art"].scale_simple(max(1, key[0]), max(1, key[1]),
-                                                               GdkPixbuf.InterpType.BILINEAR)
-            Gdk.cairo_set_source_pixbuf(cr, pb, round(rx), round(ry))
-            cr.paint()
-            # its size under it
+            px, py = to_preview(*it["slot"])
+            if (it["kind"], it["key"]) in state["stale"]:
+                # changed, and the bar hasn't caught up yet: draw what it's about to show
+                cr.set_source_rgb(0, 0, 0)
+                cr.rectangle(px, py, s * Z, s * Z)
+                cr.fill()
+                Gdk.cairo_set_source_pixbuf(cr, to_pixbuf(exact(it, size_of(it)).resize((s * Z, s * Z), Image.NEAREST)),
+                                            px, py)
+                cr.paint()
             w, h = size_of(it)
             t = f"{round(w)}×{round(h)}"
-            cr.set_font_size(12)
+            cr.set_font_size(11)
             cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL,
                                 cairo.FONT_WEIGHT_BOLD if it is sel else cairo.FONT_WEIGHT_NORMAL)
             ext = cr.text_extents(t)
             if it is sel:
                 cr.set_source_rgb(0.04, 0.52, 1.0)
             else:
-                cr.set_source_rgba(1, 1, 1, 0.9 if it["key"] in sizes[it["kind"]] else 0.55)
-            cr.move_to(it["x"] + (s * Z - ext.width) / 2, bar_top + BAR * Z + 22)
+                cr.set_source_rgba(1, 1, 1, 0.9 if it["key"] in sizes[it["kind"]] else 0.5)
+            cr.move_to(px + (s * Z - ext.width) / 2, TOP + bh * Z + 20)
             cr.show_text(t)
         if sel:
             rx, ry, rw, rh = rect(sel)
-            # guides: the selected icon's top and bottom across the whole bar, to line others up with
-            cr.set_source_rgba(0.04, 0.52, 1.0, 0.7)
+            # guides: its default size's top and bottom along the whole bar, fixed while you
+            # resize it, to see how far it is from its default and line the others up
+            _l, dtop, _w, dh = placed(sel, sel["nat"], s)
+            _px, py = to_preview(*sel["slot"])
+            cr.set_source_rgba(0.04, 0.52, 1.0, 0.75)
             cr.set_dash([4, 4])
-            for y in (round(ry) + 0.5, round(ry + rh) - 0.5):
-                cr.move_to(RULER, y)
-                cr.line_to(width, y)
-                cr.stroke()
+            for y in (round(py + dtop * Z) + 0.5, round(py + (dtop + dh) * Z) - 0.5):
+                for x0, x1, px in parts:
+                    cr.move_to(px, y)
+                    cr.line_to(px + (x1 - x0) * Z, y)
+                    cr.stroke()
             cr.set_dash([])
-            # its box and handles
             cr.set_source_rgb(0.04, 0.52, 1.0)
             cr.rectangle(round(rx) + 0.5, round(ry) + 0.5, round(rw) - 1, round(rh) - 1)
             cr.stroke()
@@ -403,9 +576,10 @@ def window():
                 w = h / ratio
         w, h = (int(min(s, max(MIN, round(v)))) for v in (w, h))
         sizes[it["kind"]][it["key"]] = [w, h]
-        changed()
+        changed(it)
 
-    def changed():
+    def changed(it=None):
+        state["stale"].update((i["kind"], i["key"]) for i in ([it] if it is not None else items))
         area.queue_draw()
         sync_inspector()
         if not pending:
@@ -415,6 +589,14 @@ def window():
         pending.clear()
         apply(sizes)
         update_buttons()
+        GLib.timeout_add(500, recapture)   # once the bar has redrawn
+        return False
+
+    def recapture():
+        if not pending and not state["drag"]:
+            capture()
+            area.queue_draw()
+            sync_inspector()
         return False
 
     # ---- mouse: click an icon to pick it, drag its edges or corners to resize it
@@ -422,13 +604,12 @@ def window():
         rx, ry, rw, rh = rect(it)
         if not (rx - HANDLE <= px <= rx + rw + HANDLE and ry - HANDLE <= py <= ry + rh + HANDLE):
             return ""
-        e = ""
-        e += "l" if abs(px - rx) <= HANDLE else "r" if abs(px - (rx + rw)) <= HANDLE else ""
+        e = "l" if abs(px - rx) <= HANDLE else "r" if abs(px - (rx + rw)) <= HANDLE else ""
         e += "t" if abs(py - ry) <= HANDLE else "b" if abs(py - (ry + rh)) <= HANDLE else ""
         return e
 
     def on_press(_a, ev):
-        area.grab_focus()
+        win.set_focus(None)          # arrow keys go to the bar, not a spin button
         if not items:
             return True
         sel = items[state["sel"]]
@@ -437,7 +618,8 @@ def window():
             state["drag"] = (e, ev.x, ev.y, size_of(sel))
             return True
         for i, it in enumerate(items):
-            if it["x"] <= ev.x <= it["x"] + s * Z and bar_top <= ev.y <= bar_top + BAR * Z + 30:
+            px, _py = to_preview(*it["slot"])
+            if px <= ev.x <= px + s * Z and TOP <= ev.y <= TOP + bh * Z + 26:
                 state["sel"] = i
                 area.queue_draw()
                 sync_inspector()
@@ -449,16 +631,15 @@ def window():
         sel = items[state["sel"]] if items else None
         if not drag:
             e = edges_at(sel, ev.x, ev.y) if sel else ""
-            name = {"l": "ew-resize", "r": "ew-resize", "t": "ns-resize", "b": "ns-resize",
-                    "lt": "nwse-resize", "rb": "nwse-resize", "rt": "nesw-resize", "lb": "nesw-resize"}.get(e)
-            win.get_window().set_cursor(Gdk.Cursor.new_from_name(win.get_display(), name) if name else None)
+            cursor = {"l": "ew-resize", "r": "ew-resize", "t": "ns-resize", "b": "ns-resize",
+                      "lt": "nwse-resize", "rb": "nwse-resize", "rt": "nesw-resize", "lb": "nesw-resize"}.get(e)
+            win.get_window().set_cursor(Gdk.Cursor.new_from_name(win.get_display(), cursor) if cursor else None)
             return True
         e, x0, y0, (w0, h0) = drag
         dx, dy = (ev.x - x0) / Z, (ev.y - y0) / Z
         w = w0 + (2 * dx if "r" in e else -2 * dx if "l" in e else 0)   # the icon stays centred,
         h = h0 + (2 * dy if "b" in e else -2 * dy if "t" in e else 0)   # so both sides move
-        keep = "w" if e in ("l", "r") else "h" if e in ("t", "b") else None
-        set_size(sel, w, h, keep)
+        set_size(sel, w, h, "w" if e in ("l", "r") else "h" if e in ("t", "b") else None)
         return True
 
     def on_release(_a, _ev):
@@ -494,12 +675,14 @@ def window():
     outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=16)
     win.add(outer)
     hint = Gtk.Label(xalign=0, wrap=True)
-    hint.set_markup(f"<small>The bar at {Z}×, each icon in its {s}px slot; the ruler counts bar pixels. "
-                    "Click an icon, then drag its edges or corners, or use ↑/↓ (height) and "
-                    "Shift+↑/↓ (width); ←/→ pick the next one. The real bar follows as you go.</small>")
+    hint.set_markup(f"<small>Your bar as it is on screen, {Z}× (the pinned apps, then the tray). The "
+                    "rulers count real pixels: screen columns along the top, px from the bar's top "
+                    "down the side. Click an icon, then drag its edges or corners, or use ↑/↓ "
+                    "(height) and Shift+↑/↓ (width); ←/→ pick the next one. The bar follows as you "
+                    "go.</small>")
     outer.pack_start(hint, False, False, 0)
 
-    area = Gtk.DrawingArea(can_focus=True)
+    area = Gtk.DrawingArea()
     area.set_size_request(width, height)
     area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
                     | Gdk.EventMask.POINTER_MOTION_MASK)
@@ -507,20 +690,16 @@ def window():
     area.connect("button-press-event", on_press)
     area.connect("motion-notify-event", on_motion)
     area.connect("button-release-event", on_release)
-    scroll = Gtk.ScrolledWindow(vscrollbar_policy=Gtk.PolicyType.NEVER)
-    scroll.set_min_content_width(min(width, 1500))
-    scroll.set_min_content_height(height)
-    scroll.add(area)
-    outer.pack_start(scroll, False, False, 0)
+    outer.pack_start(area, False, False, 0)
 
     inspector = Gtk.Box(spacing=8)
     name = Gtk.Label(xalign=0)
     ws = Gtk.SpinButton.new_with_range(MIN, s, 1)
     hs = Gtk.SpinButton.new_with_range(MIN, s, 1)
-    link = Gtk.CheckButton(label="Keep proportions", active=True)
-    reset = Gtk.Button(label="Reset", tooltip_text="Back to the artwork's own size")
-    revert_b = Gtk.Button(label="Revert")
-    save_b = Gtk.Button(label="Save")
+    link = Gtk.CheckButton(label="Keep proportions", active=True, can_focus=False)
+    reset = Gtk.Button(label="Reset", tooltip_text="Back to the artwork's own size", can_focus=False)
+    revert_b = Gtk.Button(label="Revert", can_focus=False)
+    save_b = Gtk.Button(label="Save", can_focus=False)
     save_b.get_style_context().add_class("suggested-action")
     for widget in (name, Gtk.Label(label="  W"), ws, Gtk.Label(label="H"), hs, link, reset):
         inspector.pack_start(widget, False, False, 0)
@@ -546,14 +725,13 @@ def window():
     def on_spin(spin):
         if busy or not items:
             return
-        it = items[state["sel"]]
-        set_size(it, ws.get_value(), hs.get_value(), "w" if spin is ws else "h")
+        set_size(items[state["sel"]], ws.get_value(), hs.get_value(), "w" if spin is ws else "h")
 
     def on_reset(_b):
         if items:
             it = items[state["sel"]]
             sizes[it["kind"]].pop(it["key"], None)
-            changed()
+            changed(it)
 
     def dirty():
         return sizes != saved
@@ -602,10 +780,12 @@ def window():
     win.connect("delete-event", on_close)
     win.connect("destroy", Gtk.main_quit)
     win.connect("key-press-event", on_key)
+    capture()
     sync_inspector()
     update_buttons()
     win.show_all()
-    area.grab_focus()
+    GLib.idle_add(lambda: win.set_focus(None))   # GTK focuses the first spin button on show; the
+                                                # arrow keys belong to the bar
     Gtk.main()
 
 
