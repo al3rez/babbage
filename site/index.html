@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Babbage — an opinionated Debian 13 desktop</title>
+  <meta name="description" content="Babbage is an opinionated Debian 13 desktop: XFCE running i3 tiling, one flat menu bar, Ghostty, and notifications that slide into the bar, built with a Nix Home Manager flake." />
+  <meta property="og:title" content="Babbage" />
+  <meta property="og:description" content="An opinionated Debian 13 desktop, built with Nix." />
+  <meta property="og:image" content="assets/og.png" />
+  <link rel="icon" href="assets/icon.png" />
+  <style>
+    :root {
+      --bg: #fafafa;
+      --fg: #1a1a1a;
+      --muted: #6b6b6b;
+      --border: rgba(0, 0, 0, 0.1);
+      --accent: #2f66fd;
+      --card: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121212;
+        --fg: #eeeeee;
+        --muted: #9a9a9a;
+        --border: rgba(255, 255, 255, 0.12);
+        --card: #1c1c1c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.5 -apple-system, "Adwaita Sans", "Cantarell", "Inter", "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    main { max-width: 42rem; margin: 0 auto; padding: 5rem 1.5rem 4rem; }
+    a { color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--border); transition: text-decoration-color 0.15s; }
+    a:hover { text-decoration-color: var(--fg); }
+
+    .brand { display: flex; align-items: center; gap: 1rem; margin-bottom: 2.5rem; }
+    .brand img { width: 48px; height: 48px; border-radius: 12px; }
+    .brand h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+
+    .tagline { font-size: 1.125rem; margin: 0 0 0.75rem; }
+    .tagline .caret { display: inline-block; width: 1px; background: var(--fg); animation: blink 1s steps(1) infinite; height: 1.1em; vertical-align: text-bottom; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .subtitle { color: var(--muted); margin: 0; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1.375rem 0 1rem; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);
+      font-size: 0.9375rem; font-weight: 500; text-decoration: none;
+      background: var(--card);
+    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn:hover { filter: brightness(1.05); text-decoration: none; }
+
+    h2 { font-size: 0.75rem; font-weight: 500; color: var(--muted); letter-spacing: -0.01em; margin: 2rem 0 0.75rem; }
+    ul.features { list-style: none; padding: 0; margin: 0; font-size: 0.9375rem; line-height: 1.3; }
+    ul.features li { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; }
+    ul.features li::before { content: "-"; color: var(--muted); flex-shrink: 0; }
+    ul.features strong { font-weight: 500; }
+    ul.features span { color: var(--muted); }
+
+    .shot { margin: 3rem 0; position: relative; left: 50%; transform: translateX(-50%); width: min(72rem, 100vw - 3rem); }
+    .shot img { width: 100%; border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 2px 24px rgba(0,0,0,0.12); display: block; }
+
+    .install pre {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.875rem 1rem; overflow-x: auto; font-size: 0.875rem;
+      font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+      margin: 0 0 0.75rem;
+    }
+    .faq p { font-size: 0.9375rem; margin: 0 0 0.25rem; }
+    .faq .q { font-weight: 500; }
+    .faq .a { color: var(--muted); margin-bottom: 1.25rem; }
+
+    footer { color: var(--muted); font-size: 0.875rem; margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <img src="assets/icon.png" alt="Babbage icon" width="48" height="48" />
+      <h1>Babbage</h1>
+    </div>
+
+    <p class="tagline">An opinionated desktop for <span id="typed"></span><span class="caret"></span></p>
+    <p class="subtitle">
+      XFCE running i3 tiling, one flat menu bar,
+      <a href="https://ghostty.org">Ghostty</a>, and notifications that slide
+      into the bar. One command takes a fresh Debian install there, built with
+      a Nix Home Manager flake.
+    </p>
+
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/al3rez/babbage/releases/latest">Download ISO</a>
+      <a class="btn" href="https://github.com/al3rez/babbage">GitHub</a>
+    </div>
+
+    <section>
+      <h2>FEATURES</h2>
+      <ul class="features">
+        <li><span><strong>One flat bar.</strong> <span>Workspaces, pinned apps, tray and clock in a single bar; each monitor gets its own bar with its own workspaces.</span></span></li>
+        <li><span><strong>Dock-like pins.</strong> <span>A click focuses the app wherever it is or starts it; a double-click opens a new window.</span></span></li>
+        <li><span><strong>Launcher.</strong> <span>A minimal Raycast-style launcher on Super+Space, with the apps you open most first.</span></span></li>
+        <li><span><strong>Clipboard history.</strong> <span>Text, links, colors and images on Super+Shift+V, with a preview and paste back into the app you were in.</span></span></li>
+        <li><span><strong>Light by day, dark by night.</strong> <span>Adwaita from 07:00, Adwaita-dark from 19:00; GTK, Chrome, Electron and Ghostty follow.</span></span></li>
+        <li><span><strong>Quiet notifications.</strong> <span>One line of text in the middle of the bar, slid in and out by picom, which also draws the window edges.</span></span></li>
+        <li><span><strong>Ghostty, set up.</strong> <span>Tabs, padding, light and dark themes, and a subtle curved-screen shader.</span></span></li>
+        <li><span><strong>Built with Nix.</strong> <span>A Home Manager flake on Debian; one command reproduces the whole desktop, with Tailscale and 1Password ready.</span></span></li>
+      </ul>
+    </section>
+
+    <div class="shot">
+      <img src="assets/screenshot.png" alt="Babbage at 4K: two Ghostty windows tiled by i3 under the flat menu bar" />
+    </div>
+
+    <section class="install" id="install">
+      <h2>INSTALL</h2>
+      <p class="subtitle">Download the ISO, write it to a USB stick, boot it (UEFI, Secure Boot off), answer the questions. The first login finishes Babbage over the internet.</p>
+      <h2>ALREADY ON DEBIAN 13?</h2>
+      <pre>git clone https://github.com/al3rez/babbage ~/.config/home-manager
+~/.config/home-manager/bootstrap.sh generic</pre>
+      <p class="subtitle">Requires Debian 13 (trixie) with internet access. Log out and back in when it finishes.</p>
+    </section>
+
+    <section class="faq">
+      <h2>FAQ</h2>
+      <p class="q">Why Debian and Nix?</p>
+      <p class="a">Debian underneath for drivers and apt apps; a Nix Home Manager flake for the desktop on top. One command reproduces it on a fresh install.</p>
+      <p class="q">Does it work on NVIDIA?</p>
+      <p class="a">The ISO and the generic profile use Mesa. The NVIDIA profile is tuned for the author's own desk; on other NVIDIA machines, install the driver from Debian's non-free repository.</p>
+      <p class="q">Which apps come with it?</p>
+      <p class="a">Ghostty, Grok Bot, ChatGPT, T3 Code, Slack, WhatsApp, LINE, DeepSeek Harness, Chrome and Steam, pinned on the bar; Telegram and Hex live in the tray.</p>
+      <p class="q">Is it free?</p>
+      <p class="a">The Babbage configuration is open source on GitHub. Some pinned apps, such as 1Password, Slack, Chrome and Steam, are proprietary and install from their vendors' own repositories.</p>
+    </section>
+
+    <footer>
+      Babbage is named after Charles Babbage; portrait after an 1860 photograph (public domain).
+      &nbsp;·&nbsp; <a href="https://github.com/al3rez/babbage">Source</a>
+    </footer>
+  </main>
+
+  <script>
+    // cmux-style typing tagline.
+    const words = ["Debian 13.", "tiling with i3.", "Ghostty.", "coding agents."];
+    const el = document.getElementById("typed");
+    let wi = 0, ci = 0, deleting = false;
+    function tick() {
+      const word = words[wi];
+      el.textContent = word.slice(0, ci);
+      let delay = deleting ? 40 : 80;
+      if (!deleting && ci === word.length) { delay = 1800; deleting = true; }
+      else if (deleting && ci === 0) { deleting = false; wi = (wi + 1) % words.length; delay = 300; }
+      else ci += deleting ? -1 : 1;
+      setTimeout(tick, delay);
+    }
+    tick();
+  </script>
+</body>
+</html>
