@@ -38,7 +38,16 @@ sudo apt-get install -y \
   xfce4 xfce4-goodies xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin xfce4-genmon-plugin \
   blueman network-manager-gnome tailscale
 if [ "$profile" = "al3rez" ]; then
-  sudo apt-get install -y nvidia-settings
+  # linux-headers-amd64 follows every kernel update, so DKMS can build the NVIDIA driver for
+  # it; without it a new kernel boots with no driver and a black screen. The apt hook checks
+  # the newest kernel after every apt run (builds the module, or installs missing headers in
+  # the background) and GRUB boots the newest kernel that has the driver (GRUB_DEFAULT=saved).
+  sudo apt-get install -y nvidia-settings linux-headers-amd64
+  sudo install -Dm755 "$here/files/bin/nvidia-kernel-check" /usr/local/sbin/nvidia-kernel-check
+  sudo install -Dm644 "$here/files/apt/99nvidia-kernel-check" /etc/apt/apt.conf.d/99nvidia-kernel-check
+  sudo install -Dm644 "$here/files/grub/nvidia-safe-kernel.cfg" /etc/default/grub.d/nvidia-safe-kernel.cfg
+  sudo update-grub
+  sudo /usr/local/sbin/nvidia-kernel-check
   # driver-level monitor layout, soft DPMS and both outputs pinned as connected with their
   # EDIDs (monitors never drop off X when asleep or switched off); takes effect at the next login
   sudo install -Dm644 "$here/files/xorg/20-nvidia-desk.conf" /etc/X11/xorg.conf.d/20-nvidia-desk.conf

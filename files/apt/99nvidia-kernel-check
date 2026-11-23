@@ -1,0 +1,4 @@
+// After every dpkg run: make sure the NVIDIA driver is built for the newest kernel (build it, or
+// install its missing headers), and have GRUB boot the newest kernel that has it
+// (files/bin/nvidia-kernel-check; installed by bootstrap.sh on the NVIDIA profile)
+DPkg::Post-Invoke { "/usr/local/sbin/nvidia-kernel-check || true"; };

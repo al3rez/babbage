@@ -77,14 +77,21 @@ in
     home.activation.nvidiaDeskXorg = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       check() {
         if [ -f "$2" ] && ! ${pkgs.diffutils}/bin/cmp -s "$1" "$2"; then
-          $DRY_RUN_CMD echo "WARNING: $2 differs from home-manager; run: sudo install -Dm644 $1 $2"
+          $DRY_RUN_CMD echo "WARNING: $2 differs from home-manager; run: sudo install -Dm''${3:-644} $1 $2"
         elif [ ! -f "$2" ]; then
-          $DRY_RUN_CMD echo "WARNING: missing $2; run: sudo install -Dm644 $1 $2"
+          $DRY_RUN_CMD echo "WARNING: missing $2; run: sudo install -Dm''${3:-644} $1 $2"
         fi
       }
       check "${../files/xorg/20-nvidia-desk.conf}" /etc/X11/xorg.conf.d/20-nvidia-desk.conf
       check "${../files/xorg/edid/lg-ultragear.bin}" /etc/X11/edid/lg-ultragear.bin
       check "${../files/xorg/edid/asus-mb16fc.bin}" /etc/X11/edid/asus-mb16fc.bin
+      # kernel updates must bring headers, or DKMS can't build the NVIDIA driver (black screen)
+      check "${../files/bin/nvidia-kernel-check}" /usr/local/sbin/nvidia-kernel-check 755
+      check "${../files/apt/99nvidia-kernel-check}" /etc/apt/apt.conf.d/99nvidia-kernel-check
+      check "${../files/grub/nvidia-safe-kernel.cfg}" /etc/default/grub.d/nvidia-safe-kernel.cfg
+      if [ "$(/usr/bin/dpkg-query -W -f="\''${Status}" linux-headers-amd64 2>/dev/null)" != "install ok installed" ]; then
+        $DRY_RUN_CMD echo "WARNING: linux-headers-amd64 is not installed; run: sudo apt install linux-headers-amd64"
+      fi
     '';
   };
 }

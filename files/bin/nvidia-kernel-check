@@ -1,0 +1,51 @@
+#!/bin/sh
+# Runs as root after every apt/dpkg run (DPkg::Post-Invoke, files/apt/99nvidia-kernel-check).
+# Never boot a kernel the NVIDIA driver isn't built for: X gets no driver and the screen stays
+# black (2026-11-18 and 2026-11-23: kernels 6.12.117 and 6.12.118 arrived without headers, so
+# DKMS never built nvidia for them).
+#  1. Newest kernel without the module, headers there: build it now.
+#  2. Headers missing: install them in the background as soon as this apt run lets go of the
+#     lock. DKMS builds the module when they land, and this hook runs again after that install.
+#  3. Either way GRUB boots the newest kernel that has the driver (GRUB_DEFAULT=saved,
+#     files/grub/nvidia-safe-kernel.cfg), so until the new one is ready the machine keeps
+#     booting the previous kernel instead of a black screen.
+set -u
+
+has_module() { ls "/lib/modules/$1/updates/dkms/nvidia.ko"* >/dev/null 2>&1; }
+
+kernels=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V)
+[ -n "$kernels" ] || exit 0
+newest=$(echo "$kernels" | tail -n1)
+
+if ! has_module "$newest"; then
+  if [ -d "/usr/src/linux-headers-$newest" ]; then
+    echo "nvidia-kernel-check: building the NVIDIA module for $newest"
+    dkms autoinstall -k "$newest" && has_module "$newest" && update-initramfs -u -k "$newest"
+  elif systemd-run --unit=nvidia-kernel-headers --collect --quiet \
+      --setenv=DEBIAN_FRONTEND=noninteractive \
+      apt-get install -y -o DPkg::Lock::Timeout=1800 linux-headers-amd64 "linux-headers-$newest" \
+      2>/dev/null; then
+    echo "nvidia-kernel-check: kernel $newest has no headers; installing them in the background" \
+         "(journalctl -u nvidia-kernel-headers), then DKMS builds the NVIDIA driver for it"
+  fi
+fi
+
+# boot the newest kernel that has the driver
+good=""
+for k in $kernels; do has_module "$k" && good=$k; done
+uuid=$(grub-probe --target=fs_uuid / 2>/dev/null)
+[ -n "$good" ] && [ -n "$uuid" ] || exit 0
+if [ "$good" = "$newest" ]; then
+  # back to GRUB's first entry (the newest kernel)
+  grub-editenv /boot/grub/grubenv list | grep -q '^saved_entry=' && grub-editenv /boot/grub/grubenv unset saved_entry
+  exit 0
+fi
+grub-set-default "gnulinux-advanced-$uuid>gnulinux-$good-advanced-$uuid"
+cat >&2 <<EOF
+
+!!! nvidia-kernel-check: no NVIDIA driver yet for kernel $newest, so the next boot uses $good.
+!!! It switches to $newest by itself once the driver is built for it (headers are installing
+!!! in the background if they were missing: journalctl -u nvidia-kernel-headers).
+
+EOF
+exit 0
