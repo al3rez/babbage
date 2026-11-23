@@ -20,6 +20,9 @@ let
 
     '';
   }) 9;
+  # files/lib/glyph_size.py: how every tray icon is matched to one optical size, shared by the
+  # tray popovers (other apps' icons) and Bar Icon Sizes (ours)
+  glyphLib = pkgs.writeTextDir "glyph_size.py" (builtins.readFile ../files/lib/glyph_size.py);
   # Tray popovers (files/bin/menubar-popovers): Tailscale's own tray item, and stand-ins for
   # the apps in hiddenTray so their menus open as the same macOS-style popover. Nix GTK +
   # typelibs; the tailscale CLI is Debian's, matching its tailscaled.
@@ -31,7 +34,7 @@ let
     export LC_ALL=C.UTF-8        # Nix's glibc can't load Debian's locales
     export TAILSCALE=/usr/bin/tailscale XCLIP=${pkgs.xclip}/bin/xclip
     export I3=${pkgs.i3}/bin/i3 XFCONF_QUERY=/usr/bin/xfconf-query
-    export MENUBAR_ICONS=${../files/icons/tailscale}
+    export MENUBAR_ICONS=${../files/icons/tailscale} PYTHONPATH=${glyphLib}
     exec ${pkgs.python3.withPackages (p: [ p.pygobject3 ])}/bin/python3 ${../files/bin/menubar-popovers} "$@"
   '';
 
@@ -198,7 +201,7 @@ let
     export XFCONF_QUERY=/usr/bin/xfconf-query
     export BAR_ICONS_CONFIG=${config.xdg.configHome}/home-manager/files/panel/icon-sizes.json
     export BAR_ICONS_DEFAULT=${../files/panel/icon-sizes.json}
-    export BAR_ICONS_PINNED=${pinnedFarm} BAR_ICONS_TRAY=${../files/icons/tailscale}
+    export BAR_ICONS_PINNED=${pinnedFarm} BAR_ICONS_TRAY=${../files/icons/tailscale} PYTHONPATH=${glyphLib}
     exec ${pkgs.python3.withPackages (p: [ p.pygobject3 p.pycairo p.pillow ])}/bin/python3 ${../files/bin/bar-icons} "$@"
   '';
 in

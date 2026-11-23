@@ -12,8 +12,9 @@ menu, and opens one popover style for all of them:
     fixed full-colour bitmap, hidden in the tray (modules/panel.nix hidden-items).
   * Every other app's tray icon (PROXIED by name: Telegram, Bluetooth, Wi-Fi, Hex; any other app,
     e.g. Sunshine): a stand-in icon, our glyph or the app's own icon as a flat white silhouette
-    like the others; the original is hidden in the tray (modules/panel.nix hidden-items, plus
-    the Ids added here for apps not listed there).
+    at the same optical size as the others (files/lib/glyph_size.py, the target bar-icons
+    writes); the original is hidden in the tray (modules/panel.nix hidden-items, plus the Ids
+    added here for apps not listed there).
     The popover shows the app's real menu, read over dbusmenu: checkmarks on the right,
     submenus expand in place, disabled items greyed; choosing an item sends the click back.
 
@@ -45,6 +46,8 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
 
+import glyph_size  # noqa: E402  (files/lib, on the wrapper's PYTHONPATH)
+
 TAILSCALE = os.environ.get("TAILSCALE", "tailscale")
 ICONS = os.environ["MENUBAR_ICONS"]
 # glyphs resized by files/bin/bar-icons (same names as in ICONS); shown from RUNTIME under a
@@ -72,7 +75,11 @@ WIDTH_PT = 340    # popover width in points (macOS popovers are ~300-340pt)
 # hidden-items): full-colour Electron icons, and 1Password, which has its own item here
 PROXIED = {"nm-applet": "Wi-Fi", "TelegramDesktop": "Telegram", "blueman": "Bluetooth", "hex": "Hex"}
 UNPROXIED = {"Slack_status_icon_1", "chrome_status_icon_1", "1Password_status_icon_1"}
-WHITE = 64       # px of the flat white glyphs made from other apps' icons
+# Tray Ids whose icon is a glyph of ours (Wi-Fi, Hex) or one bar-icons draws (Telegram): sized
+# there. Every other app's icon is made a flat white glyph here, at the same optical size.
+GLYPHED = {"nm-applet", "hex", "TelegramDesktop"}
+WHITE = 64       # px of the flat white glyphs made from other apps' icons, drawn in the tray's
+SLOT = 30        # SLOT px icon slot
 
 WATCHER = ("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
 SNI = "org.kde.StatusNotifierItem"
@@ -143,25 +150,54 @@ def xfconf_strings(prop, values=None):
     return [line.strip() for line in out.splitlines()[2:] if line.strip()]
 
 
-def white_glyph(pb):
+def tray_size():
+    """The size every tray icon is matched to (files/lib/glyph_size.py), as bar-icons last wrote it."""
+    try:
+        with open(os.path.join(RESIZED, "tray-size")) as f:
+            return float(f.read())
+    except (OSError, ValueError):
+        return glyph_size.DEFAULT_TARGET
+
+
+def white_glyph(pb, target):
     """An app's tray icon as a flat white glyph, like the other tray icons: its shape (alpha) in
-    white. An icon drawn on an opaque tile (its shape fills the square) keeps its bright parts
-    instead. Returns SNI IconPixmap data: [(w, h, ARGB32 in network byte order)]."""
+    white, at the optical size of a round glyph `target` px across, centred in the slot
+    (files/lib/glyph_size.py: the same rule bar-icons sizes our glyphs by). An icon drawn on an
+    opaque tile (its shape fills the square) keeps its bright parts instead. Returns SNI
+    IconPixmap data: [(w, h, ARGB32 in network byte order)]."""
     if not pb.get_has_alpha():
         pb = pb.add_alpha(False, 0, 0, 0)
     w, h = pb.get_width(), pb.get_height()
-    if max(w, h) != WHITE:
+    if max(w, h) < WHITE:       # small bitmaps first up to size, so the shape is measured finely
         k = WHITE / max(w, h)
         w, h = max(1, round(w * k)), max(1, round(h * k))
         pb = pb.scale_simple(w, h, GdkPixbuf.InterpType.HYPER)
     rs, px = pb.get_rowstride(), pb.get_pixels()
     pixels = [px[y * rs + x * 4: y * rs + x * 4 + 4] for y in range(h) for x in range(w)]
     tile = sum(p[3] > 200 for p in pixels) / len(pixels) > 0.8
+    shape = [a * (r * 299 + g * 587 + b * 114) // 255000 if tile else a for r, g, b, a in pixels]
+    m = glyph_size.measure(bytes(shape), w, h)
+    if not m:
+        return []
+    x0, y0, x1, y1 = m["bbox"]
+    white = bytearray()
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            white += bytes((255, 255, 255, shape[y * w + x]))
+    glyph = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(white)), GdkPixbuf.Colorspace.RGB,
+                                            True, 8, x1 - x0, y1 - y0, (x1 - x0) * 4)
+    k = glyph_size.auto_scale(m, target, SLOT, WHITE / SLOT)
+    gw, gh = max(1, round((x1 - x0) * k)), max(1, round((y1 - y0) * k))
+    glyph = glyph.scale_simple(gw, gh, GdkPixbuf.InterpType.HYPER)
+    canvas = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, WHITE, WHITE)
+    canvas.fill(0x00000000)
+    glyph.copy_area(0, 0, gw, gh, canvas, (WHITE - gw) // 2, (WHITE - gh) // 2)
+    rs, px = canvas.get_rowstride(), canvas.get_pixels()
     out = bytearray()
-    for r, g, b, a in pixels:
-        v = a * (r * 299 + g * 587 + b * 114) // 255000 if tile else a
-        out += bytes((v, 255, 255, 255))
-    return [(w, h, bytes(out))]
+    for y in range(WHITE):
+        for x in range(WHITE):
+            out += bytes((px[y * rs + x * 4 + 3], 255, 255, 255))
+    return [(WHITE, WHITE, bytes(out))]
 
 
 def pixbuf_from_sni(pixmaps):
@@ -533,7 +569,8 @@ class ProxyItem(TrayItem):
     our popover with the app's menu."""
 
     def __init__(self, app, service, original_id):
-        self.generic = original_id not in PROXIED   # an app with no glyph of ours
+        self.generic = original_id not in PROXIED   # titled and Id'd after the app itself
+        self.whiten = original_id not in GLYPHED    # its icon made flat white here
         self.title = PROXIED.get(original_id, original_id)
         self.slug = "".join(c if c.isalnum() else "_" for c in original_id)
         self.white_key = self.white = None
@@ -577,16 +614,15 @@ class ProxyItem(TrayItem):
         self.emit(signal, params if signal == "NewStatus" else None)
 
     def white_icon(self, o):
-        """(IconName, IconThemePath, IconPixmap) for an app with no glyph of ours: its symbolic
-        icon if the theme has one (the tray draws those white), else its icon made flat white."""
+        """(IconName, IconThemePath, IconPixmap) for an app with no glyph of ours: its icon (the
+        symbolic one if the theme has it) made a flat white glyph at the tray's matched size."""
         name, path = o.get("IconName", ""), o.get("IconThemePath", "")
         theme = Gtk.IconTheme.get_default()
         if name and not name.endswith("-symbolic") and theme.has_icon(name + "-symbolic"):
             name += "-symbolic"
-        if name.endswith("-symbolic"):
-            return (*glyph(name, (name, path)), [])
         pixmaps = o.get("IconPixmap", [])
-        key = (name, path, hash(b"".join(bytes(p[2]) for p in pixmaps)))
+        target = tray_size()
+        key = (name, path, target, hash(b"".join(bytes(p[2]) for p in pixmaps)))
         if key != self.white_key:
             pb = None
             files = [os.path.join(path, f"{name}.{ext}") for ext in ("svg", "png", "xpm")] if name and path else []
@@ -600,7 +636,7 @@ class ProxyItem(TrayItem):
                     pb = pixbuf_from_sni(pixmaps)
             except GLib.Error:
                 pb = pixbuf_from_sni(pixmaps)
-            self.white_key, self.white = key, white_glyph(pb) if pb else []
+            self.white_key, self.white = key, white_glyph(pb, target) if pb else []
         return "", "", self.white
 
     def props(self):
@@ -608,7 +644,7 @@ class ProxyItem(TrayItem):
         tip = o.get("ToolTip") or ("", [], "", "")
         icon, theme_path = o.get("IconName", ""), o.get("IconThemePath", "")
         pixmap = [] if self.title == "Hex" else o.get("IconPixmap", [])
-        if self.generic:
+        if self.whiten:
             icon, theme_path, pixmap = self.white_icon(o)
         elif icon.startswith("nm-signal-"):
             # Wi-Fi strength: our own glyph (files/icons/tailscale/menubar-wifi-N). The theme's
@@ -620,7 +656,7 @@ class ProxyItem(TrayItem):
             icon, theme_path = glyph("menubar-hex")
         elif icon and not icon.endswith("-symbolic") and Gtk.IconTheme.get_default().has_icon(icon + "-symbolic"):
             icon += "-symbolic"   # symbolic variants render like the other tray glyphs
-        if icon and not icon.startswith("menubar-") and not self.generic:
+        if icon and not icon.startswith("menubar-") and not self.whiten:
             icon, theme_path = glyph(icon, (icon, theme_path))   # a theme icon bar-icons resized
         return {
             "Category": GLib.Variant("s", o.get("Category", "ApplicationStatus")),

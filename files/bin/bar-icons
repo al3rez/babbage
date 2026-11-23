@@ -2,17 +2,21 @@
 """Bar icon sizes: the width and height of each pinned app's icon and each tray glyph on the
 menu bar, changed live and saved to the Babbage repo.
 
-  bar-icons          a window with one row per icon: width and height in px (linked to keep
-                     the proportions, or not) and Reset. The bar changes as you go; Save writes
-                     the sizes to the repo (files/panel/icon-sizes.json), Revert goes back to
-                     the saved ones.
+  bar-icons          your bar, magnified, at its real places: click an icon and drag its edges
+                     (or use the arrow keys) to size it; set the size every tray icon is matched
+                     to. The bar changes as you go; Save writes the sizes to the repo
+                     (files/panel/icon-sizes.json), Revert goes back to the saved ones.
   bar-icons apply    draws the saved sizes on the bar; Home Manager runs it after every switch.
 
 A size is the icon's visible size inside the bar's icon slot (xfce4-panel icon-size, 30px), so
-at most the slot. Icons without one keep their artwork's own size. A pinned app gets a PNG
-drawn at exactly that size, and its launcher's Icon= points at it (the launcher plugin
-notices the file change). A tray glyph (files/icons/tailscale) gets a scaled copy of its SVG in
-the state directory, which files/bin/menubar-popovers watches and shows instead.
+at most the slot. Tray icons are matched automatically: each is drawn at the optical size of a
+round one `tray-size` px across (files/lib/glyph_size.py: equal silhouette areas, solid shapes a
+little smaller), unless sized by hand; menubar-popovers does the same for any other app's tray
+icon. Pinned apps without a size keep their artwork's own (they're already matched). A pinned
+app gets a PNG drawn at exactly its size, and its launcher's Icon= points at it (the launcher
+plugin notices the file change). A tray glyph (Babbage's, files/icons/tailscale, or the icon
+theme's) gets a scaled copy of its SVG in the state directory, which files/bin/menubar-popovers
+watches and shows instead.
 """
 import configparser
 import glob
@@ -22,12 +26,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import gi
 
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, GLib  # noqa: E402
 from PIL import Image  # noqa: E402
+
+import glyph_size  # noqa: E402  (files/lib, on the wrapper's PYTHONPATH)
 
 CONFIG = os.environ["BAR_ICONS_CONFIG"]            # the repo's icon-sizes.json (Save writes it)
 DEFAULT = os.environ["BAR_ICONS_DEFAULT"]          # the same file as built, if the repo isn't there
@@ -72,11 +79,13 @@ def load_sizes():
     path = CONFIG if os.path.exists(CONFIG) else DEFAULT
     with open(path) as f:
         data = json.load(f)
-    return {"pinned": dict(data.get("pinned", {})), "tray": dict(data.get("tray", {}))}
+    return {"pinned": dict(data.get("pinned", {})), "tray": dict(data.get("tray", {})),
+            "tray-size": data.get("tray-size", glyph_size.DEFAULT_TARGET)}
 
 
 def save_sizes(sizes):
     data = {k: {name: list(wh) for name, wh in sorted(sizes[k].items())} for k in ("pinned", "tray")}
+    data["tray-size"] = sizes["tray-size"]
     tmp = CONFIG + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
@@ -244,14 +253,30 @@ def scaled_tray(names, wh, s):
     return out
 
 
+MEASURE = 512   # px a glyph is drawn at to measure its shape
+
+
+def auto_tray(names, s, target):
+    """(w, h) in bar px a tray group is drawn at unless set by hand: its first glyph at the
+    optical size of a round glyph `target` px across (files/lib/glyph_size.py), so every tray
+    icon looks the same size."""
+    w, h, _, _ = natural(load(tray_source(names[0]), s), s)
+    big = load(tray_source(names[0]), MEASURE)
+    m = glyph_size.measure(big.split()[3].tobytes(), big.width, big.height)
+    if not m:
+        return w, h
+    k = glyph_size.auto_scale(m, target, s, max(big.width, big.height) / s)
+    return w * k, h * k
+
+
 def apply_tray(sizes, s):
     out_dir = os.path.join(STATE, "tray")
     os.makedirs(out_dir, exist_ok=True)
     wanted = set()
     for label, names in TRAY_GROUPS:
-        wh = sizes["tray"].get(label)
-        if not wh or not tray_source(names[0]):
+        if not tray_source(names[0]):
             continue
+        wh = sizes["tray"].get(label) or auto_tray(names, s, sizes["tray-size"])
         for name, text in scaled_tray(names, wh, s).items():
             out = os.path.join(out_dir, f"{name}.svg")
             wanted.add(out)
@@ -262,6 +287,13 @@ def apply_tray(sizes, s):
     for old in glob.glob(os.path.join(out_dir, "*.svg")):
         if old not in wanted:
             os.remove(old)
+    # menubar-popovers sizes other apps' tray icons by the same target
+    size_file = os.path.join(out_dir, "tray-size")
+    text = f"{sizes['tray-size']}\n"
+    if not os.path.exists(size_file) or open(size_file).read() != text:
+        with open(size_file + ".tmp", "w") as f:
+            f.write(text)
+        os.replace(size_file + ".tmp", size_file)
 
 
 def apply(sizes):
@@ -300,10 +332,11 @@ def svg_image(text, s):
 
 
 def placed(it, wh, s):
-    """(left, top, width, height) of an icon's drawn art in its s px slot, in bar px: where
-    draw_pinned puts a set size, wherever the artwork puts its own size."""
+    """(left, top, width, height) of an icon's drawn art in its s px slot, in bar px: a pinned
+    app's set size where draw_pinned puts it (whole px); a tray glyph (scaled as a vector) or
+    the artwork's own size around the artwork's centre."""
     (w, h), (cx, cy) = wh, it["centre"]
-    if wh == it["nat"]:
+    if it["kind"] == "tray" or wh == it["nat"]:
         return cx - w / 2, cy - h / 2, w, h
     return min(max(0, round(cx - w / 2)), s - w), min(max(0, round(cy - h / 2)), s - h), w, h
 
@@ -338,6 +371,8 @@ def bar_layout():
                 for k, pid in enumerate(ids):
                     e = node.get_child_at_index(k).get_extents(Atspi.CoordType.SCREEN)
                     box = (e.x, e.y, e.width, e.height)
+                    if e.x < 0 or e.y < 0 or e.width < 2:
+                        continue   # not laid out (yet): AT-SPI says so with INT_MIN or 1x1
                     if pid in files:
                         out["pinned"][files[pid]] = box
                     elif kinds[pid] == "systray":
@@ -357,10 +392,25 @@ def window():
     saved = load_sizes()
     sizes = json.loads(json.dumps(saved))
     layout = bar_layout()
+    if layout is None:
+        # the panel registers with the accessibility bus when it starts; if that bus was
+        # restarted since, the bar isn't on it: restart the bar and look again
+        subprocess.run(["xfce4-panel", "--restart"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(20):
+            time.sleep(0.5)
+            layout = bar_layout()
+            if layout and layout["pinned"]:
+                time.sleep(1)   # let the bar draw its icons before it's captured
+                break
     if not layout or not layout["pinned"]:
-        dlg = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
-                                text="Can't find the menu bar")
-        dlg.format_secondary_text("Bar Icon Sizes reads the bar's layout over accessibility (AT-SPI).")
+        hidden = layout is not None   # on the bus, but nothing laid out on screen
+        dlg = Gtk.MessageDialog(message_type=Gtk.MessageType.INFO if hidden else Gtk.MessageType.ERROR,
+                                buttons=Gtk.ButtonsType.CLOSE,
+                                text="The menu bar is hidden right now" if hidden else "Can't find the menu bar")
+        dlg.format_secondary_text(
+            "A fullscreen window covers it (i3 hides the bar under one). Leave fullscreen, then open "
+            "Bar Icon Sizes again." if hidden else
+            "Bar Icon Sizes reads the bar's layout over accessibility (AT-SPI).")
         dlg.run()
         return
     bx, by, bw, bh = layout["bar"]
@@ -405,14 +455,18 @@ def window():
         if tray_source(names[0]):
             w, h, cx, cy = natural(load(tray_source(names[0]), s), s)
             tray_items.append(dict(kind="tray", key=label, label=label, nat=(w, h), centre=(cx, cy),
-                                   names=names, slot=None))
+                                   names=names, slot=None, auto=auto_tray(names, s, sizes["tray-size"])))
 
     state = {"sel": 0, "drag": None, "shot": [], "stale": set()}
     pending = []
 
+    def default_of(it):
+        """A tray icon's automatic size (all tray icons matched), a pinned app's own size."""
+        return it["auto"] if it["kind"] == "tray" else it["nat"]
+
     def size_of(it):
         wh = sizes[it["kind"]].get(it["key"])
-        return (wh[0], wh[1]) if wh else it["nat"]
+        return (wh[0], wh[1]) if wh else default_of(it)
 
     def exact(it, wh, name=None):
         """What the bar draws for it (or the group's icon `name`) at wh, as an s x s image (tray
@@ -420,10 +474,7 @@ def window():
         if it["kind"] == "pinned":
             return draw_pinned(it["src"], wh, s)
         name = name or it["names"][0]
-        if wh == it["nat"]:
-            img = load(tray_source(name), s)
-        else:
-            img = svg_image(scaled_tray(it["names"], wh, s)[name], s)
+        img = svg_image(scaled_tray(it["names"], wh, s)[name], s)
         white = Image.new("RGBA", img.size, "white")
         white.putalpha(img.split()[3])
         return white
@@ -455,7 +506,7 @@ def window():
                 on_bar = sizes["tray"].get(it["key"])
                 # the tray draws glyphs in white on the black bar: compare each of the group's
                 # shapes (alpha) with the bar's brightness
-                wants = [exact(it, tuple(on_bar) if on_bar else it["nat"], n).split()[3]
+                wants = [exact(it, tuple(on_bar) if on_bar else it["auto"], n).split()[3]
                          for n in it["names"] if tray_source(n)]
                 best, best_score = None, 1e9
                 for a, b in runs:
@@ -540,7 +591,7 @@ def window():
             rx, ry, rw, rh = rect(sel)
             # guides: its default size's top and bottom along the whole bar, fixed while you
             # resize it, to see how far it is from its default and line the others up
-            _l, dtop, _w, dh = placed(sel, sel["nat"], s)
+            _l, dtop, _w, dh = placed(sel, default_of(sel), s)
             _px, py = to_preview(*sel["slot"])
             cr.set_source_rgba(0.04, 0.52, 1.0, 0.75)
             cr.set_dash([4, 4])
@@ -697,7 +748,8 @@ def window():
     ws = Gtk.SpinButton.new_with_range(MIN, s, 1)
     hs = Gtk.SpinButton.new_with_range(MIN, s, 1)
     link = Gtk.CheckButton(label="Keep proportions", active=True, can_focus=False)
-    reset = Gtk.Button(label="Reset", tooltip_text="Back to the artwork's own size", can_focus=False)
+    reset = Gtk.Button(label="Reset", can_focus=False,
+                       tooltip_text="Back to automatic (a tray icon) or the artwork's own size (a pinned app)")
     revert_b = Gtk.Button(label="Revert", can_focus=False)
     save_b = Gtk.Button(label="Save", can_focus=False)
     save_b.get_style_context().add_class("suggested-action")
@@ -706,6 +758,15 @@ def window():
     inspector.pack_end(save_b, False, False, 0)
     inspector.pack_end(revert_b, False, False, 0)
     outer.pack_start(inspector, False, False, 0)
+    # every tray icon (ours and any app's) is drawn at the optical size of a round one this many
+    # px across (files/lib/glyph_size.py), unless sized by hand above
+    general = Gtk.Box(spacing=8)
+    tray_size = Gtk.SpinButton.new_with_range(12, s - 2, 1)
+    tray_size.set_value(sizes["tray-size"])
+    for widget in (Gtk.Label(label="Tray icons"), tray_size,
+                   Gtk.Label(label="px: every tray icon is matched to a round one this wide, unless you size it yourself")):
+        general.pack_start(widget, False, False, 0)
+    outer.pack_start(general, False, False, 0)
     status = Gtk.Label(xalign=0)
     outer.pack_start(status, False, False, 0)
 
@@ -733,6 +794,16 @@ def window():
             sizes[it["kind"]].pop(it["key"], None)
             changed(it)
 
+    def set_tray_size(target):
+        sizes["tray-size"] = target
+        for it in tray_items:
+            it["auto"] = auto_tray(it["names"], s, target)
+        changed()
+
+    def on_tray_size(spin):
+        if not busy:
+            set_tray_size(int(spin.get_value()))
+
     def dirty():
         return sizes != saved
 
@@ -751,8 +822,11 @@ def window():
     def do_revert(_b):
         for k in ("pinned", "tray"):
             sizes[k] = dict(saved[k])
+        busy.append(1)
+        tray_size.set_value(saved["tray-size"])
+        busy.clear()
         status.set_text("")
-        changed()
+        set_tray_size(saved["tray-size"])
 
     def on_close(_w, _e):
         if not dirty():
@@ -775,6 +849,7 @@ def window():
     ws.connect("value-changed", on_spin)
     hs.connect("value-changed", on_spin)
     reset.connect("clicked", on_reset)
+    tray_size.connect("value-changed", on_tray_size)
     save_b.connect("clicked", do_save)
     revert_b.connect("clicked", do_revert)
     win.connect("delete-event", on_close)
