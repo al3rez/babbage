@@ -72,6 +72,9 @@ if [ "$profile" = "al3rez" ]; then
   # EDIDs (monitors never drop off X when asleep or switched off); takes effect at the next login
   sudo install -Dm644 "$here/files/xorg/20-nvidia-desk.conf" /etc/X11/xorg.conf.d/20-nvidia-desk.conf
   sudo install -Dm644 -t /etc/X11/edid "$here/files/xorg/edid/lg-ultragear.bin" "$here/files/xorg/edid/asus-mb16fc.bin"
+  # 24/7 server: nothing can suspend it, not even GDM's login screen (it suspends after 20 idle
+  # minutes on its own, so a reboot nobody logs in after would take the machine offline)
+  sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
 fi
 sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on
