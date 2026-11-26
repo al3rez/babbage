@@ -80,10 +80,14 @@ sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on
 if [ "$profile" = "al3rez" ]; then
   # Rex server for the Macs (superlogical.com/rex/docs/linux/installation): Rex's own apt repo,
-  # pinned above Debian's unrelated Perl "rex"; then a personal server that starts at boot and
-  # keeps running while logged out (linger). The Macs add it as ssh://$USER@<this machine>.
+  # pinned above Debian's unrelated Perl "rex"; then a personal server for the xfce account (the
+  # 24/7 desktop user) that starts at boot and keeps running while logged out: what
+  # `rex server install` does, run for xfce. The Macs add it as ssh://xfce@<this machine>.
   curl -fsSL https://pkgs.superlogical.com/rex/install.sh | sh
-  rex server install
+  if id xfce >/dev/null 2>&1; then
+    sudo loginctl enable-linger xfce
+    sudo systemctl --user -M xfce@ enable --now rex.socket
+  fi
 fi
 
 # Grok Bot, ChatGPT (with Codex) and T3 Code nightly are ~1 GB together, and Grok Bot's CDN
