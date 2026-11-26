@@ -78,6 +78,13 @@ if [ "$profile" = "al3rez" ]; then
 fi
 sudo systemctl enable --now tailscaled
 sudo tailscale set --operator="$USER" --ssh   # no sudo needed for tailscale; Tailscale SSH on
+if [ "$profile" = "al3rez" ]; then
+  # Rex server for the Macs (superlogical.com/rex/docs/linux/installation): Rex's own apt repo,
+  # pinned above Debian's unrelated Perl "rex"; then a personal server that starts at boot and
+  # keeps running while logged out (linger). The Macs add it as ssh://$USER@<this machine>.
+  curl -fsSL https://pkgs.superlogical.com/rex/install.sh | sh
+  rex server install
+fi
 
 # Grok Bot, ChatGPT (with Codex) and T3 Code nightly are ~1 GB together, and Grok Bot's CDN
 # crawls over some IPv4 routes (~30 KB/s vs MB/s over IPv6, measured from Bangkok), so they
