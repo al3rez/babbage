@@ -69,3 +69,6 @@ config-file = superlogical-tabs/superlogical-tabs.conf
 # curved screen (shaders/curve.glsl): a slight CRT-style bulge and soft corner darkening, text
 # stays sharp. WARP and VIGNETTE at the top of the file set the strength. Remove to turn off.
 custom-shader = shaders/curve.glsl
+# the curve is static: redraw only when the terminal changes. The default animation loop
+# redraws the window every frame (240 fps on the LG), which kept the GPU at full power (~50 W).
+custom-shader-animation = false
