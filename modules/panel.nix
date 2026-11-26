@@ -60,7 +60,7 @@ let
   # menu bar look, on both bars:
   #   "clear"  transparent: the wallpaper shows through, white glyphs and text over it
   #   "black"  flat solid black: no wallpaper behind it, same white glyphs and text
-  barStyle = "black";
+  barStyle = "clear";
   barRgba = { clear = [ 0.0 0.0 0.0 0.0 ]; black = [ 0.0 0.0 0.0 1.0 ]; }.${barStyle};
   panelLook = n: {
     "panels/panel-${toString n}/position" = "p=9;x=0;y=0";
